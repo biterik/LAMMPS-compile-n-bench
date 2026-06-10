@@ -127,6 +127,7 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_CXX_STANDARD=17 \
     -D BUILD_MPI=on -D BUILD_OMP=on \
+    -D LAMMPS_MACHINE=cmmg \
     -D CMAKE_C_COMPILER="$MPICC" \
     -D CMAKE_CXX_COMPILER="$MPICXX" \
     -D CMAKE_CXX_FLAGS="-O3 -march=znver4" \
@@ -141,13 +142,13 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
 
 cmake --build "$BUILD" -j "$JOBS"
 echo
-echo "DONE: $BUILD/lmp"
+echo "DONE: $BUILD/lmp_cmmg"
 
 # Smoke test: list installed packages. The binary is Intel-MPI-linked, so a bare
 # run on the login node hits SLURM's PMI (I_MPI_PMI_LIBRARY) and aborts in
 # MPI_Init. Force a true singleton init by clearing the PMI lib, and never let
 # this optional check abort the (already successful) build.
 echo ">> installed packages:"
-( unset I_MPI_PMI_LIBRARY; I_MPI_FABRICS=shm "$BUILD/lmp" -h 2>/dev/null \
+( unset I_MPI_PMI_LIBRARY; I_MPI_FABRICS=shm "$BUILD/lmp_cmmg" -h 2>/dev/null \
     | sed -n '/Installed packages/,/^$/p' | head -20 ) \
-  || echo "   (could not run lmp on the login node — verify in a job: srun ... $BUILD/lmp -h)"
+  || echo "   (could not run lmp_cmmg on the login node — verify in a job: srun ... $BUILD/lmp_cmmg -h)"

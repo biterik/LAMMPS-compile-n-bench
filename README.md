@@ -18,16 +18,20 @@ Three self-contained build scripts compile the latest **stable** LAMMPS
 on three different hardware/backends, plus a single `pair_style pace` benchmark
 that runs *unmodified* on all of them so the results are apples-to-apples.
 
-| Machine | Hardware | Kokkos backend | Kokkos arch | Compiler |
+| Build (binary) | Hardware | Kokkos backend | Kokkos arch | Compiler |
 |---|---|---|---|---|
-| **cmmg** | 2× AMD EPYC 9754 (Zen4c), CPU | OpenMP | `ZEN4` | `g++` (`-march=znver4`) |
-| **viper** | AMD Instinct MI300A APU (gfx942) | HIP | `AMD_GFX942_APU` | `hipcc` (wrapper) |
-| **raven** | NVIDIA A100 40 GB (Ampere) | CUDA | `AMPERE80` | `nvcc_wrapper` / g++13 |
-| **raven-cpu** | 2× Intel Xeon IceLake-SP (AVX-512), CPU | — (MPI + INTEL/OpenMP) | — | `icpx` (oneAPI, `-xCORE-AVX512`) |
+| **cmmg** (`lmp_cmmg`) | 2× AMD EPYC 9754 (Zen4c), CPU | OpenMP | `ZEN4` | `g++` (`-march=znver4`) |
+| **viper** (`lmp_viper`) | AMD Instinct MI300A APU (gfx942) | HIP | `AMD_GFX942_APU` | `hipcc` (wrapper) |
+| **viper-cpu** (`lmp_viper_cpu`) | 2× AMD EPYC 9554 (Zen4 Genoa), CPU | OpenMP | `ZEN4` | `g++` (`-march=znver4`) |
+| **raven** (`lmp_raven`) | NVIDIA A100 40 GB (Ampere) | CUDA | `AMPERE80` | `nvcc_wrapper` / g++13 |
+| **raven-cpu** (`lmp_raven_cpu`) | 2× Intel Xeon IceLake-SP (AVX-512), CPU | — (MPI + INTEL/OpenMP) | — | `icpx` (oneAPI, `-xCORE-AVX512`) |
 
-The **raven-cpu** build is the odd one out: it targets Raven's Intel Xeon CPU
-nodes (not the A100s) with the Intel oneAPI toolchain and the LAMMPS **INTEL**
-package enabled — see [the package table below](#why-some-packages-are-built-on-some-machines-but-not-others).
+Each build produces a **distinctly named binary** `lmp_<machine>` (via the LAMMPS
+`LAMMPS_MACHINE` option) in its own `lammps/build-<machine>/` directory, so no two
+builds ever overwrite each other — see [Binaries](#binaries). The **raven-cpu**
+build is the odd one out: it targets Raven's Intel Xeon CPU nodes (not the A100s)
+with the Intel oneAPI toolchain and the LAMMPS **INTEL** package enabled — see
+[the package table below](#why-some-packages-are-built-on-some-machines-but-not-others).
 
 ### The target machines
 
@@ -35,7 +39,10 @@ package enabled — see [the package table below](#why-some-packages-are-built-o
   [System overview](https://www.mpcdf.mpg.de/services/supercomputing/viper) ·
   [Viper-GPU user guide](https://docs.mpcdf.mpg.de/doc/computing/viper-gpu-user-guide.html).
   Each APU couples 24 CPU cores and one GPU with 128 GB shared HBM3 (unified
-  host/device memory).
+  host/device memory). Viper also has a large **CPU** partition — 2× AMD EPYC
+  9554 "Genoa" (128 Zen4 cores/node),
+  [Viper-CPU user guide](https://docs.mpcdf.mpg.de/doc/computing/viper-user-guide.html) —
+  targeted by the `viper-cpu` build/benchmark.
 - **Raven** (NVIDIA A100) — Max Planck Computing and Data Facility.
   [System overview](https://www.mpcdf.mpg.de/services/supercomputing/raven) ·
   [User guide](https://docs.mpcdf.mpg.de/doc/computing/raven-user-guide.html) ·
@@ -57,12 +64,14 @@ General MPCDF HPC documentation: <https://docs.mpcdf.mpg.de/doc/computing/>.
 ```
 LAMMPS-compile-n-bench/
   cmake/lammps-packages-mpcdf.cmake   shared package set (used by all builds)
-  build-lammps-viper.sh               Viper-GPU: KOKKOS + HIP   (MI300A, gfx942 APU)
-  build-lammps-raven.sh               Raven-GPU: KOKKOS + CUDA  (A100, AMPERE80)
-  build-lammps-raven-cpu.sh           Raven-CPU: Intel oneAPI + INTEL pkg (Xeon IceLake)
-  build-lammps-cmmg.sh                cmmg:      CPU, KOKKOS/OpenMP (EPYC Zen4)
+  build-lammps-viper.sh               Viper-GPU: KOKKOS + HIP   (MI300A) -> lmp_viper
+  build-lammps-viper-cpu.sh           Viper-CPU: KOKKOS/OpenMP  (EPYC Genoa) -> lmp_viper_cpu
+  build-lammps-raven.sh               Raven-GPU: KOKKOS + CUDA  (A100)  -> lmp_raven
+  build-lammps-raven-cpu.sh           Raven-CPU: Intel oneAPI + INTEL pkg -> lmp_raven_cpu
+  build-lammps-cmmg.sh                cmmg:      CPU, KOKKOS/OpenMP (EPYC) -> lmp_cmmg
   bench/in.pace_bench                 PACE fcc-Cu benchmark input (CPU + GPU)
   bench/submit-viper.slurm            1× MI300A APU (exclusive node)
+  bench/submit-viper-cpu.slurm        1 full Viper CPU node (128 ranks)
   bench/submit-raven.slurm            1× A100 (exclusive node)
   bench/submit-raven-cpu.slurm        1 full Raven CPU node (72 ranks, INTEL pkg)
   bench/submit-cmmg.slurm             1 full EPYC node (256 ranks)
@@ -87,18 +96,37 @@ internet, which compute nodes don't have.
 
 ```bash
 # copy this folder to the cluster, then, from a /ptmp/$USER work dir:
-./build-lammps-viper.sh       # on viper login nodes (GPU)
+./build-lammps-viper.sh       # on viper login nodes (MI300A GPU)
+./build-lammps-viper-cpu.sh   # on viper login nodes (EPYC Genoa CPU)
 ./build-lammps-raven.sh       # on raven login nodes (A100 GPU)
 ./build-lammps-raven-cpu.sh   # on raven login nodes (Xeon CPU + INTEL package)
 ./build-lammps-cmmg.sh        # on cmmg login nodes (EPYC CPU)
 ```
 
 The clone and build land in the directory you launch from:
-`<launch-dir>/lammps/build-<machine>/lmp` (override with `SRC=` / `BUILD=`).
-Launch from `/ptmp/$USER`, **not** `$HOME`. The GPU builds compile every source
-through `hipcc` / `nvcc_wrapper` and pull in the external packages, so expect a
-long compile (tens of minutes). Each script tees its output to
+`<launch-dir>/lammps/build-<machine>/lmp_<machine>` (override with `SRC=` /
+`BUILD=`). Launch from `/ptmp/$USER`, **not** `$HOME`. The GPU builds compile every
+source through `hipcc` / `nvcc_wrapper` and pull in the external packages, so
+expect a long compile (tens of minutes). Each script tees its output to
 `build-<machine>-<timestamp>.log`.
+
+### Binaries
+
+Every build sets the LAMMPS `LAMMPS_MACHINE` option, so the executable is named
+**`lmp_<machine>`** rather than the default `lmp`:
+
+| Build | Directory | Binary |
+|---|---|---|
+| cmmg | `lammps/build-cmmg/` | `lmp_cmmg` |
+| viper | `lammps/build-viper/` | `lmp_viper` |
+| viper-cpu | `lammps/build-viper-cpu/` | `lmp_viper_cpu` |
+| raven | `lammps/build-raven/` | `lmp_raven` |
+| raven-cpu | `lammps/build-raven-cpu/` | `lmp_raven_cpu` |
+
+Builds already live in separate `build-<machine>/` directories, so they never
+clobber each other; the distinct *names* mean you can also copy several binaries
+into one work dir (or `$PATH`) without collision. Each `submit-*.slurm` already
+points `LMP` at the matching `lmp_<machine>`.
 
 Per-machine module stacks and the exact, confirmed-working CMake flags are
 documented in **[STATUS.md](STATUS.md)**, along with 14 hard-won build gotchas
@@ -164,6 +192,7 @@ sbatch LAMMPS-compile-n-bench/bench/submit-cmmg.slurm       # 1 full EPYC node (
 sbatch LAMMPS-compile-n-bench/bench/submit-raven.slurm      # 1 A100 (exclusive node)
 sbatch LAMMPS-compile-n-bench/bench/submit-raven-cpu.slurm  # 1 full Raven CPU node (72 ranks, INTEL pkg)
 sbatch LAMMPS-compile-n-bench/bench/submit-viper.slurm      # 1 MI300A APU (sets HSA_XNACK=1)
+sbatch LAMMPS-compile-n-bench/bench/submit-viper-cpu.slurm  # 1 full Viper CPU node (128 ranks)
 ```
 
 The `raven-cpu` run engages the INTEL package (`-pk intel 0 omp 1 -sf intel`).
@@ -215,6 +244,7 @@ reported — half-node CPU runs are excluded (see the note below).
 | **viper** | 1× MI300A APU | Kokkos HIP | 1 | **509** | 99.8 | 0.2 | **1.29×** |
 | **raven** | 1× A100 (40 GB) | Kokkos CUDA | 1 | 360 | 99.9 | 0.1 | 0.92× |
 | **raven-cpu** | full node, 2× Xeon IceLake (72 cores) | MPI 72×1, INTEL pkg | 72 | _pending_ | — | — | — |
+| **viper-cpu** | full node, 2× EPYC 9554 (128 cores) | MPI 128×1, non-Kokkos `pace` | 128 | _pending_ | — | — | — |
 
 Wall time for the 500 steps: cmmg 325 s, viper 251 s, raven 355 s.
 

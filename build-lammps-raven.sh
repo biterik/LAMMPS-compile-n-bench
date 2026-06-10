@@ -142,6 +142,7 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_CXX_STANDARD=17 \
     -D BUILD_MPI=on -D BUILD_OMP=on \
+    -D LAMMPS_MACHINE=raven \
     -D CMAKE_CXX_COMPILER=mpicxx \
     -D USE_INTERNAL_LINALG=off -D BLA_VENDOR=Intel10_64lp_seq \
     -D PKG_PLUMED=off \
@@ -159,9 +160,9 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
 
 cmake --build "$BUILD" -j "$JOBS"
 echo
-echo "DONE: $BUILD/lmp"
+echo "DONE: $BUILD/lmp_raven"
 # Optional smoke test; never abort the (successful) build if the binary can't
 # run on the login node (no GPU / MPI launch differences).
 echo ">> installed packages:"
-( "$BUILD/lmp" -h 2>/dev/null | sed -n '/Installed packages/,/^$/p' | head -20 ) \
-  || echo "   (could not run lmp on the login node — verify in a job: srun ... $BUILD/lmp -h)"
+( "$BUILD/lmp_raven" -h 2>/dev/null | sed -n '/Installed packages/,/^$/p' | head -20 ) \
+  || echo "   (could not run lmp_raven on the login node — verify in a job: srun ... $BUILD/lmp_raven -h)"

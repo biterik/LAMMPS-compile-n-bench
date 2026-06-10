@@ -30,7 +30,7 @@ module load intel/2025.3 impi/2021.17 mkl/2025.3
 export OMP_NUM_THREADS=1       # pure MPI, one rank per physical core
 
 # point LMP at the CPU binary (build script puts it in <launch-dir>/lammps/build-raven-cpu/)
-LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-raven-cpu/lmp}"
+LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-raven-cpu/lmp_raven_cpu}"
 
 # -pk intel 0 omp 1  : enable the INTEL package (0 coprocessors, 1 OpenMP thread/rank)
 # -sf intel          : use intel-accelerated styles where available (pace falls back)

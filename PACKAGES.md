@@ -21,6 +21,10 @@ for the rationale behind the per-machine differences.
 | `KOKKOS`  | ✓ (OpenMP) | ✓ (HIP) | ✓ (CUDA) | ✗ | raven-cpu uses INTEL/OPENMP/OPT instead of Kokkos. |
 | `KIM`     | ✓ (downloaded) | ✓ (downloaded) | ✓ (pre-built, g++) | ✓ (downloaded) | raven (CUDA) pre-builds KIM with g++ in a conda-free env to avoid a libgfortran clash (gotcha 13). |
 
+The **viper-cpu** build (AMD EPYC Genoa, Zen4) mirrors **cmmg** exactly: Kokkos
+OpenMP, INTEL off, PLUMED off, VORONOI downloaded, ML-UF3 on. It's omitted from the
+table to keep it readable.
+
 Everything below is **built identically on all builds** (modulo the rows above).
 
 ## Packages with no external library

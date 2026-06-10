@@ -29,7 +29,7 @@ export OMP_NUM_THREADS=1
 export HSA_XNACK=1
 
 # point LMP at the binary you built (build script puts it in <launch-dir>/lammps/build-viper/)
-LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-viper/lmp}"
+LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-viper/lmp_viper}"
 
 srun "$LMP" -k on g 1 -sf kk -pk kokkos newton on neigh half \
      -in in.pace_bench -log log.pace_viper

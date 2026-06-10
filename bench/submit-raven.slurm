@@ -23,7 +23,7 @@ module load gcc/13 cuda/12.6 openmpi_gpu/5.0
 export OMP_NUM_THREADS=1
 
 # point LMP at the binary you built (build script puts it in <launch-dir>/lammps/build-raven/)
-LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-raven/lmp}"
+LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-raven/lmp_raven}"
 
 srun "$LMP" -k on g 1 -sf kk -pk kokkos newton on neigh half \
      -in in.pace_bench -log log.pace_raven

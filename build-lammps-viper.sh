@@ -121,6 +121,7 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D CMAKE_CXX_STANDARD=17 \
     -D CMAKE_CXX_STANDARD_REQUIRED=ON \
     -D BUILD_MPI=on -D BUILD_OMP=on \
+    -D LAMMPS_MACHINE=viper \
     -D MPI_CXX_SKIP_MPICXX=on \
     -D MPI_CXX_COMPILER=mpic++ \
     -D CMAKE_CXX_COMPILER="$HIPCC_WRAP" \
@@ -143,9 +144,9 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
 
 cmake --build "$BUILD" -j "$JOBS"
 echo
-echo "DONE: $BUILD/lmp"
+echo "DONE: $BUILD/lmp_viper"
 # Optional smoke test; never abort the (successful) build if the binary can't
 # run on the login node.
 echo ">> installed packages:"
-( "$BUILD/lmp" -h 2>/dev/null | sed -n '/Installed packages/,/^$/p' | head -20 ) \
-  || echo "   (could not run lmp on the login node — verify in a job: srun ... $BUILD/lmp -h)"
+( "$BUILD/lmp_viper" -h 2>/dev/null | sed -n '/Installed packages/,/^$/p' | head -20 ) \
+  || echo "   (could not run lmp_viper on the login node — verify in a job: srun ... $BUILD/lmp_viper -h)"

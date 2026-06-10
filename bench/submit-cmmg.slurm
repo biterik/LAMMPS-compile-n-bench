@@ -23,6 +23,6 @@ module load impi/2021.16
 export OMP_NUM_THREADS=1        # HT is on — keep 1 thread/rank, physical cores only
 
 # point LMP at the binary you built (build script puts it in <launch-dir>/lammps/build-cmmg/)
-LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-cmmg/lmp}"
+LMP="${LMP:-${SLURM_SUBMIT_DIR:-$PWD}/lammps/build-cmmg/lmp_cmmg}"
 
 srun "$LMP" -in in.pace_bench -log log.pace_cmmg

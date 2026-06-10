@@ -130,6 +130,7 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_CXX_STANDARD=17 \
     -D BUILD_MPI=on -D BUILD_OMP=on \
+    -D LAMMPS_MACHINE=raven_cpu \
     -D CMAKE_C_COMPILER="$MPICC" \
     -D CMAKE_CXX_COMPILER="$MPICXX" \
     -D CMAKE_CXX_FLAGS="-O3 -xCORE-AVX512 -qopt-zmm-usage=high" \
@@ -149,12 +150,12 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
 
 cmake --build "$BUILD" -j "$JOBS"
 echo
-echo "DONE: $BUILD/lmp"
+echo "DONE: $BUILD/lmp_raven_cpu"
 
 # Smoke test: list installed packages. The binary is Intel-MPI-linked, so a bare
 # run on the login node hits SLURM's PMI and aborts in MPI_Init. Force a true
 # singleton init, and never let this optional check abort the successful build.
 echo ">> installed packages:"
-( unset I_MPI_PMI_LIBRARY; I_MPI_FABRICS=shm "$BUILD/lmp" -h 2>/dev/null \
+( unset I_MPI_PMI_LIBRARY; I_MPI_FABRICS=shm "$BUILD/lmp_raven_cpu" -h 2>/dev/null \
     | sed -n '/Installed packages/,/^$/p' | head -25 ) \
-  || echo "   (could not run lmp on the login node — verify in a job: srun ... $BUILD/lmp -h)"
+  || echo "   (could not run lmp_raven_cpu on the login node — verify in a job: srun ... $BUILD/lmp_raven_cpu -h)"
