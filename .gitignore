@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# LAMMPS source clone + build trees (the scripts clone/build into ./lammps)
+lammps/
+build-*/
+build-*.log
+
+# Benchmark runtime artifacts
+*.restart
+*.dump
+dump.*
+slurm-*.out
+
+# Potentials are NOT redistributed here — copy from LAMMPS potentials/ at run time
+bench/*.ace
+
+# Editor / temp
+*~
+*.swp
+*.bak
