@@ -14,7 +14,7 @@ build scripts from a `/ptmp/$USER` work dir — they clone + build into `$PWD/la
 |---|---|---|---|
 | **cmmg** | AMD EPYC 9754 (Zen4c), CPU, Kokkos/OpenMP | ✅ **builds, `lmp` produced** | ✅ **run (1 socket / 128 ranks)** |
 | **viper** | AMD MI300A APU (gfx942 APU), Kokkos/HIP | ✅ **builds, `lmp` produced** | ✅ **run (1 APU)** |
-| **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | 🟡 voro++ fix applied — **needs clean re-run to confirm** | not run yet |
+| **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | ✅ **builds, `lmp` produced** (external MKL linalg; KIM pre-built; conda-free) | not run yet |
 
 ## Benchmark results so far (PACE, fcc-Cu, 256k atoms, 500 steps, `timer full`)
 
@@ -32,16 +32,16 @@ is now set to **`--ntasks=256`** (full node); the full-node cmmg number is pendi
 
 1. **cmmg full node** — re-run now that `submit-cmmg.slurm` uses `--ntasks=256`
    (1000 atoms/core; Comm% will rise a little). ~10 min wall.
-2. **Raven** — re-run clean and confirm it builds through:
+2. **Raven** — ✅ builds (external MKL linalg, pre-built KIM-API, conda-free,
+   benign diagnostics suppressed). Just **run the benchmark** (step 3). If you
+   ever re-clone, re-run clean with:
    ```bash
    cd ~/PTMP          # dir that holds lammps/
    rm -rf lammps/build-raven
    bash mpcdf-lammps/build-lammps-raven.sh 2>&1 | tee /tmp/raven.log
    ```
-   If a *new* external-lib package fails with an `nvcc`/`tmpxft…` parse error,
-   it's the same class as voro++ → pre-build it with g++ (see voro++ pattern in
-   the script) and paste the log. **Also consider `-D PKG_ML-UF3=off`** (see
-   gotcha 10) if the CUDA ScatterView assertion shows up.
+   `ML-UF3` is still ON on Raven and built fine; disable with `-D PKG_ML-UF3=off`
+   only if a future re-clone hits the CUDA ScatterView assertion (gotcha 10).
 3. **Run the benchmark** on each (from the work dir where `lammps/` lives):
    ```bash
    cp mpcdf-lammps/bench/in.pace_bench .
@@ -60,8 +60,11 @@ is now set to **`--ntasks=256`** (full node); the full-node cmmg number is pendi
 - **cmmg**: `module load gcc/13 impi/2021.16 cmake/3.30 mkl/2025.2 gsl/2.7`.
   MPI wrappers are **`mpigcc` / `mpig++`** (NOT mpicc/mpicxx), found under
   `$I_MPI_ROOT/bin`. Kokkos OpenMP + `Kokkos_ARCH_ZEN4`, `-march=znver4`.
-- **raven**: `module load gcc/13 cuda/12.6 openmpi_gpu/5.0 cmake`. Kokkos CUDA,
-  `Kokkos_ARCH_AMPERE80`, via `nvcc_wrapper` (set as `OMPI_CXX`, `CXX=mpicxx`).
+- **raven**: `module load gcc/13 cuda/12.6 openmpi_gpu/5.0 cmake mkl/2025.2`.
+  Kokkos CUDA, `Kokkos_ARCH_AMPERE80`, via `nvcc_wrapper` (set as `OMPI_CXX`,
+  `CXX=mpicxx`). Uses **external MKL** linalg (`USE_INTERNAL_LINALG=off`, gotcha
+  12), **pre-built KIM-API** + a **conda-free** environment (gotcha 13), and
+  `-diag-suppress` for the benign nvcc diagnostics (gotcha 14).
 - **viper**: `module load gcc/14 rocm/6.3 openmpi_gpu/5.0 cmake`. Kokkos HIP,
   `Kokkos_ARCH_AMD_GFX942_APU`, `-munsafe-fp-atomics`. **`CXX` = a generated
   `hipcc-cxx17` wrapper** (not bare hipcc) that strips CMake's `-std=c++98` probe
@@ -128,6 +131,28 @@ is now set to **`--ntasks=256`** (full node); the full-node cmmg number is pendi
     plus `-D USE_INTERNAL_LINALG=off -D BLA_VENDOR=Intel10_64lp_seq` (these `-D`
     come after `-C`, so they override the FORCED preset value, per gotcha 6).
     cmmg (g++) and viper (hipcc/clang) don't hit this — it's nvcc-only.
+13. **An active conda env poisons the Raven build (libgfortran clash).** A child
+    `bash` inherits conda's `PATH`/`LD_LIBRARY_PATH` and `CONDA_PREFIX` even
+    though the `conda` *function* isn't defined non-interactively (so you can't
+    just `conda deactivate` inside the script). Conda ships an old
+    **libgfortran.so.4**; when LAMMPS auto-builds KIM-API its Fortran links that,
+    and the final link warns *"libgfortran.so.4 … may conflict with
+    libgfortran.so.5"* (gcc/13's). Two-part fix in `build-lammps-raven.sh`:
+    (a) strip every `conda` element from `PATH`/`LD_LIBRARY_PATH`/`LIBRARY_PATH`
+    and unset the `CONDA_*` vars at the top; (b) **pre-build KIM-API separately**
+    with the module `gcc/g++/gfortran` (mirrors the voro++ pattern) and pass it
+    via `-D DOWNLOAD_KIM=off` + `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH`. The KIM
+    version is read from LAMMPS' own `cmake/Modules/Packages/KIM.cmake` to stay
+    in lockstep. The KIM lib dir is added to the `lmp` rpath so a KIM potential
+    resolves at runtime. (Only matters if you actually use KIM — the PACE
+    benchmark doesn't — but the build is now clean.)
+14. **Cosmetic nvcc diagnostics are silenced, not fixed.** The Raven build emits
+    many benign `#177-D`/`#550-D` (unused var), `#611-D` (partially-overridden
+    virtual), `#186-D` (unsigned-vs-zero), and `#20011-D` (host dtor from
+    host/device fn, in unused KOKKOS files) warnings — all in third-party or
+    unused code, none affecting the binary. They're quieted with
+    `-D CMAKE_CXX_FLAGS="-diag-suppress 177,550,611,186,20011"` so genuine
+    warnings stand out. Remove that flag if you want to see them again.
 
 ## File map (`mpcdf-lammps/`)
 

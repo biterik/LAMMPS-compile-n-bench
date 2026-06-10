@@ -48,6 +48,23 @@ LOG="${LOG:-$RUN_DIR/build-raven-$(date +%Y%m%d-%H%M%S).log}"
 exec > >(tee -a "$LOG") 2>&1
 echo ">> logging this run to: $LOG"
 
+# --- Detach from any active conda environment (gotcha 13) -------------------
+# A child shell inherits conda's PATH / LD_LIBRARY_PATH entries (and CONDA_PREFIX)
+# even though the `conda` shell function isn't defined non-interactively. Conda
+# ships an old libgfortran (.so.4) that otherwise leaks into the KIM link and
+# clashes with gcc/13's libgfortran.so.5. Strip every conda element so the build
+# uses ONLY the module GNU toolchain. (Equivalent to `conda deactivate` first.)
+_drop_conda() { printf '%s' "${1:-}" | tr ':' '\n' | grep -viE 'conda' | paste -sd: ; true; }
+if [ -n "${CONDA_PREFIX:-}" ] || printf '%s' "${PATH}" | grep -qiE 'conda'; then
+    echo ">> conda detected — removing it from PATH/LD_LIBRARY_PATH for a clean GNU build"
+    export PATH="$(_drop_conda "$PATH")"
+    export LD_LIBRARY_PATH="$(_drop_conda "${LD_LIBRARY_PATH:-}")"
+    export LIBRARY_PATH="$(_drop_conda "${LIBRARY_PATH:-}")"
+    unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PYTHON_EXE CONDA_SHLVL || true
+fi
+echo ">> g++:      $(command -v g++)"
+echo ">> gfortran: $(command -v gfortran)"
+
 SRC="${SRC:-$RUN_DIR/lammps}"
 BUILD="${BUILD:-$SRC/build-raven}"
 JOBS="${JOBS:-8}"                 # nvcc is memory-hungry; keep -j modest
@@ -79,6 +96,42 @@ fi
 [ -f "$VORO_LIB" ] || { echo "ERROR: voro++ build failed; $VORO_LIB missing" >&2; exit 1; }
 echo ">> voro++ lib: $VORO_LIB"
 
+# --- pre-build KIM-API with the host GNU toolchain (KIM) --------------------
+# Under the auto-download path LAMMPS builds kim-api during configure, and its
+# Fortran links against whatever gfortran is first on PATH — an active conda env
+# pulls in libgfortran.so.4 and clashes with gcc/13's .so.5 (the
+# "libgfortran.so.4 ... may conflict with libgfortran.so.5" linker warning).
+# We build kim-api ourselves with the module gcc/gfortran (conda already stripped
+# above) and hand it to LAMMPS via DOWNLOAD_KIM=off + find_package. Version is
+# read from LAMMPS' own KIM.cmake so we stay in lockstep with the release.
+# Override with KIM_VER=... if needed.
+KIM_VER="${KIM_VER:-$(grep -oE 'kim-api-[0-9]+\.[0-9]+\.[0-9]+' "$SRC/cmake/Modules/Packages/KIM.cmake" 2>/dev/null | head -1 | sed 's/kim-api-//')}"
+KIM_VER="${KIM_VER:-2.4.1}"
+KIM_PREFIX="$RUN_DIR/kim-api-$KIM_VER-install"
+if [ ! -f "$KIM_PREFIX/lib64/libkim-api.so" ] && [ ! -f "$KIM_PREFIX/lib/libkim-api.so" ]; then
+    echo ">> building KIM-API $KIM_VER with the GNU toolchain (gcc/g++/gfortran), conda-free"
+    ( cd "$RUN_DIR"
+      if [ ! -d "kim-api-$KIM_VER" ]; then
+          curl -fL -o "kim-api-$KIM_VER.txz" \
+               "https://s3.openkim.org/kim-api/kim-api-$KIM_VER.txz"
+          tar xf "kim-api-$KIM_VER.txz"
+      fi
+      cmake -S "kim-api-$KIM_VER" -B "kim-api-$KIM_VER/build" \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D CMAKE_C_COMPILER=gcc \
+            -D CMAKE_CXX_COMPILER=g++ \
+            -D CMAKE_Fortran_COMPILER=gfortran \
+            -D CMAKE_INSTALL_PREFIX="$KIM_PREFIX"
+      cmake --build "kim-api-$KIM_VER/build" -j "$JOBS"
+      cmake --install "kim-api-$KIM_VER/build" )
+fi
+{ [ -f "$KIM_PREFIX/lib64/libkim-api.so" ] || [ -f "$KIM_PREFIX/lib/libkim-api.so" ]; } \
+    || { echo "ERROR: KIM-API build failed; libkim-api.so missing under $KIM_PREFIX" >&2; exit 1; }
+echo ">> KIM-API prefix: $KIM_PREFIX"
+# Make the prebuilt KIM discoverable by LAMMPS' find_package / pkg-config.
+export CMAKE_PREFIX_PATH="$KIM_PREFIX:${CMAKE_PREFIX_PATH:-}"
+export PKG_CONFIG_PATH="$KIM_PREFIX/lib64/pkgconfig:$KIM_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
 # Compile through Kokkos' nvcc_wrapper; make the OpenMPI C++ wrapper call it so
 # MPI include/link flags are handled while device code still goes through nvcc.
 export NVCC_WRAPPER_DEFAULT_COMPILER=g++
@@ -94,13 +147,15 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D PKG_PLUMED=off \
     -D PKG_VORONOI=on -D DOWNLOAD_VORO=off \
     -D VORO_LIBRARY="$VORO_LIB" -D VORO_INCLUDE_DIR="$VORO_INC" \
+    -D PKG_KIM=on -D DOWNLOAD_KIM=off \
     -D PKG_KOKKOS=on \
     -D Kokkos_ENABLE_SERIAL=on \
     -D Kokkos_ENABLE_OPENMP=off \
     -D Kokkos_ENABLE_CUDA=on \
     -D Kokkos_ARCH_AMPERE80=on \
     -D FFT=KISS -D FFT_KOKKOS=CUFFT \
-    -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath=\$ORIGIN/../lib64"
+    -D CMAKE_CXX_FLAGS="-diag-suppress 177,550,611,186,20011" \
+    -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath=\$ORIGIN/../lib64 -Wl,-rpath=$KIM_PREFIX/lib64 -Wl,-rpath=$KIM_PREFIX/lib"
 
 cmake --build "$BUILD" -j "$JOBS"
 echo
