@@ -206,9 +206,10 @@ force evaluation, not MPI.
 > reported just 113 katom-step/s — 3.5× *slower* than the full node for half the
 > cores (strongly super-linear), the fingerprint of a co-scheduled job contending
 > for shared resources on a half-empty node. The full-node run is the trustworthy
-> CPU number. For the same reason the single-GPU runs are best taken on an
-> **exclusive** node allocation (`#SBATCH --exclusive`) to rule out interference
-> from jobs sharing the node. See [STATUS.md](STATUS.md) for live status.
+> CPU number. For the same reason the GPU submit scripts now request
+> `#SBATCH --exclusive` (reserve the whole node, even though only one device is
+> used); the single-GPU numbers above predate that change and will be refreshed on
+> the next run. See [STATUS.md](STATUS.md) for live status.
 
 ---
 

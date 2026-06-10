@@ -8,6 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18      # 72 host cores / 4 GPUs per node
 #SBATCH --gres=gpu:a100:1
+#SBATCH --exclusive             # reserve the whole node: no co-scheduled job can contend (we still use 1 A100)
 #SBATCH --time=00:15:00
 
 # ensure 'module' exists without a login shell (avoids login-profile early exit)

@@ -34,19 +34,19 @@ full 256-core EPYC node**; a full EPYC node is within ~8% of one A100.
 **Caveat (Erik's rule: full nodes only).** The earlier 1-socket cmmg run gave 113
 katom-step/s — 3.5× slower than the full node for half the cores, i.e. super-linear,
 the signature of a co-scheduled job on the shared half-node. Excluded. The GPU runs
-used `--gres=gpu:1` on a shared node; for fully contention-free GPU numbers, add
-`#SBATCH --exclusive` to the GPU submit scripts and re-run.
+above used `--gres=gpu:1` on a shared node; the submit scripts **now request
+`#SBATCH --exclusive`**, so re-running viper/raven will refresh those numbers
+contention-free (ACE is compute-bound, so expect only a small shift).
 
 ## Immediate next steps
 
 All three machines now build **and** have a benchmark result (table above). Builds
 and the first comparison are done. Remaining / optional:
 
-1. **Exclusive GPU re-runs (optional, for rigour).** The viper/raven runs used
-   `--gres=gpu:1` on a shared node. Add `#SBATCH --exclusive` to
-   `submit-viper.slurm` / `submit-raven.slurm` and re-run to confirm the
-   single-GPU numbers are contention-free (ACE is compute-bound, so the shift
-   should be small). Then update the table if it moves.
+1. **Exclusive GPU re-runs (for rigour).** `submit-viper.slurm` /
+   `submit-raven.slurm` now request `#SBATCH --exclusive`. Re-run both to refresh
+   the single-GPU numbers contention-free (ACE is compute-bound, so the shift
+   should be small), then update the table if it moves.
 2. **Re-clone build sanity (only if you wipe `lammps/`).** Raven builds clean now;
    if you ever `rm -rf lammps/build-raven`, just re-run
    `bash mpcdf-lammps/build-lammps-raven.sh`. `ML-UF3` is ON and built fine —

@@ -8,6 +8,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24
 #SBATCH --gres=gpu:1            # one MI300A APU (verify gres name with `sinfo`/example scripts)
+#SBATCH --exclusive             # reserve the whole node: no co-scheduled job can contend (we still use 1 APU)
 #SBATCH --time=00:15:00
 
 # ensure 'module' exists without a login shell (avoids login-profile early exit)
