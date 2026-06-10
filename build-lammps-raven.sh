@@ -27,6 +27,12 @@ fi
 #     silently under strict mode. ---
 module purge
 module load gcc/13 cuda/12.6 openmpi_gpu/5.0 cmake
+# External LAPACK for the GPU build: the bundled (internal) linalg is f2c C++ and
+# cannot be compiled by nvcc_wrapper (nvcc force-includes CUDA's math_functions.h,
+# whose `log` clashes with the f2c `log` decl in lib/linalg/dbdsdc.cpp). We link
+# MKL instead and turn USE_INTERNAL_LINALG off below. If this exact version isn't
+# present, run `module avail mkl` and pin an available one.
+module load mkl/2025.2
 
 set -euo pipefail
 
@@ -84,6 +90,7 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D CMAKE_CXX_STANDARD=17 \
     -D BUILD_MPI=on -D BUILD_OMP=on \
     -D CMAKE_CXX_COMPILER=mpicxx \
+    -D USE_INTERNAL_LINALG=off -D BLA_VENDOR=Intel10_64lp_seq \
     -D PKG_PLUMED=off \
     -D PKG_VORONOI=on -D DOWNLOAD_VORO=off \
     -D VORO_LIBRARY="$VORO_LIB" -D VORO_INCLUDE_DIR="$VORO_INC" \

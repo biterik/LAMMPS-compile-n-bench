@@ -119,6 +119,15 @@ is now set to **`--ntasks=256`** (full node); the full-node cmmg number is pendi
     uses unified memory (GPU reads host allocations via HMM); without XNACK the
     first device access faults and the run dies silently right after Kokkos init
     (`log` stops at the LAMMPS banner). Set in `submit-viper.slurm`.
+12. **Internal linalg won't compile under nvcc (Raven).** The shared preset sets
+    `USE_INTERNAL_LINALG=ON` (bundled f2c LAPACK). On Raven everything is built
+    via `nvcc_wrapper`, and nvcc force-includes `crt/math_functions.h`, whose
+    `log` collides with the f2c `double log(doublereal)` decl in
+    `lib/linalg/dbdsdc.cpp` → *"linkage specification is incompatible with
+    previous log"*. Fix: link external MKL instead — `module load mkl/2025.2`
+    plus `-D USE_INTERNAL_LINALG=off -D BLA_VENDOR=Intel10_64lp_seq` (these `-D`
+    come after `-C`, so they override the FORCED preset value, per gotcha 6).
+    cmmg (g++) and viper (hipcc/clang) don't hit this — it's nvcc-only.
 
 ## File map (`mpcdf-lammps/`)
 
