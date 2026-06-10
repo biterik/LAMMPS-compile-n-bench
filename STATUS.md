@@ -12,37 +12,52 @@ build scripts from a `/ptmp/$USER` work dir — they clone + build into `$PWD/la
 
 | Machine | HW / backend | Build status | Benchmark |
 |---|---|---|---|
-| **cmmg** | AMD EPYC 9754 (Zen4c), CPU, Kokkos/OpenMP | ✅ **builds, `lmp` produced** | ✅ **run (1 socket / 128 ranks)** |
+| **cmmg** | AMD EPYC 9754 (Zen4c), CPU, Kokkos/OpenMP | ✅ **builds, `lmp` produced** | ✅ **run (full node, 256 ranks)** |
 | **viper** | AMD MI300A APU (gfx942 APU), Kokkos/HIP | ✅ **builds, `lmp` produced** | ✅ **run (1 APU)** |
-| **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | ✅ **builds, `lmp` produced** (external MKL linalg; KIM pre-built; conda-free) | not run yet |
+| **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | ✅ **builds, `lmp` produced** (external MKL linalg; KIM pre-built; conda-free) | ✅ **run (1 A100)** |
 
-## Benchmark results so far (PACE, fcc-Cu, 256k atoms, 500 steps, `timer full`)
+## Benchmark results (PACE, fcc-Cu, 256k atoms, 500 steps, `timer full`)
 
-| Machine | procs | katom-step/s | Pair% | Comm% | speedup |
-|---|---|---|---|---|---|
-| **viper** (1 MI300A APU) | 1 | 509 | 99.8% | 0.2% | 4.49× |
-| **cmmg** (1 socket, 128 cores) | 128 | 113 | 96.3% | 3.6% | 1.00× |
+Reference = **full-node cmmg** (256 cores). Only full-node CPU + single-device GPU
+runs are reported; the old half-node (128-core) cmmg run is excluded (contended).
 
-Both runs are **compute-bound** (Comm ≤ 4%) → the benchmark measures the ACE force
-eval, not MPI. One MI300A APU ≈ **4.5× one 128-core EPYC socket**. `submit-cmmg.slurm`
-is now set to **`--ntasks=256`** (full node); the full-node cmmg number is pending
-(expect ~225 katom-step/s → APU ≈ 2.3× a full node).
+| Machine | config | procs | katom-step/s | Pair% | Comm% | wall | speedup |
+|---|---|---|---|---|---|---|---|
+| **cmmg** | full node, 256 cores | 256 | 393 | 95.4% | 4.5% | 325 s | 1.00× |
+| **viper** | 1 MI300A APU | 1 | 509 | 99.8% | 0.2% | 251 s | 1.29× |
+| **raven** | 1 A100 40GB | 1 | 360 | 99.9% | 0.1% | 355 s | 0.92× |
+
+All runs are **compute-bound** (Pair ≥ 95%) → the benchmark measures the ACE force
+eval, not MPI. For this kernel: **MI300A ≈ 1.4× one A100** (509 vs 360), **1.29× a
+full 256-core EPYC node**; a full EPYC node is within ~8% of one A100.
+
+**Caveat (Erik's rule: full nodes only).** The earlier 1-socket cmmg run gave 113
+katom-step/s — 3.5× slower than the full node for half the cores, i.e. super-linear,
+the signature of a co-scheduled job on the shared half-node. Excluded. The GPU runs
+used `--gres=gpu:1` on a shared node; for fully contention-free GPU numbers, add
+`#SBATCH --exclusive` to the GPU submit scripts and re-run.
 
 ## Immediate next steps
 
-1. **cmmg full node** — re-run now that `submit-cmmg.slurm` uses `--ntasks=256`
-   (1000 atoms/core; Comm% will rise a little). ~10 min wall.
-2. **Raven** — ✅ builds (external MKL linalg, pre-built KIM-API, conda-free,
-   benign diagnostics suppressed). Just **run the benchmark** (step 3). If you
-   ever re-clone, re-run clean with:
-   ```bash
-   cd ~/PTMP          # dir that holds lammps/
-   rm -rf lammps/build-raven
-   bash mpcdf-lammps/build-lammps-raven.sh 2>&1 | tee /tmp/raven.log
-   ```
-   `ML-UF3` is still ON on Raven and built fine; disable with `-D PKG_ML-UF3=off`
-   only if a future re-clone hits the CUDA ScatterView assertion (gotcha 10).
-3. **Run the benchmark** on each (from the work dir where `lammps/` lives):
+All three machines now build **and** have a benchmark result (table above). Builds
+and the first comparison are done. Remaining / optional:
+
+1. **Exclusive GPU re-runs (optional, for rigour).** The viper/raven runs used
+   `--gres=gpu:1` on a shared node. Add `#SBATCH --exclusive` to
+   `submit-viper.slurm` / `submit-raven.slurm` and re-run to confirm the
+   single-GPU numbers are contention-free (ACE is compute-bound, so the shift
+   should be small). Then update the table if it moves.
+2. **Re-clone build sanity (only if you wipe `lammps/`).** Raven builds clean now;
+   if you ever `rm -rf lammps/build-raven`, just re-run
+   `bash mpcdf-lammps/build-lammps-raven.sh`. `ML-UF3` is ON and built fine —
+   disable with `-D PKG_ML-UF3=off` only if a re-clone hits the CUDA ScatterView
+   assertion (gotcha 10).
+3. **Longer / larger runs.** To stress the GPUs more, raise `-var nsteps` (or
+   `nx/ny/nz`); keep atoms×steps identical across machines for a fair compare,
+   and re-run `bash mpcdf-lammps/bench/compare-pace.sh` to regenerate the table.
+
+<details><summary>How to re-run the benchmark (reference)</summary>
+
    ```bash
    cp mpcdf-lammps/bench/in.pace_bench .
    cp lammps/potentials/Cu-PBE-core-rep.ace .
@@ -50,10 +65,11 @@ is now set to **`--ntasks=256`** (full node); the full-node cmmg number is pendi
    sbatch mpcdf-lammps/bench/submit-raven.slurm
    sbatch mpcdf-lammps/bench/submit-viper.slurm
    ```
-4. **Compare**: gather the three `log.pace_*` onto one host, then
+   Then **compare**: gather the `log.pace_*` onto one host and
    `bash mpcdf-lammps/bench/compare-pace.sh` (reports katom-step/s + Pair%/Comm%).
-   Tune `-var nsteps` so a single GPU run is ~10 min; keep atoms×steps identical
-   across machines for a fair comparison.
+   Keep atoms×steps identical across machines for a fair comparison.
+
+</details>
 
 ## Per-machine build config (confirmed working values)
 

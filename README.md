@@ -182,22 +182,33 @@ which prints a throughput table including the `Pair%` / `Comm%` breakdown from
 
 ## Results so far
 
-PACE, fcc-Cu, **256,000 atoms, 500 steps**, `timer full`. **cmmg is the reference**
-(speedup = 1.00×). "Run mode" is how the binary is actually driven at run time —
-note cmmg runs as plain MPI with the standard (non-Kokkos) `pair_style pace`,
-while the GPU runs use Kokkos.
+PACE, fcc-Cu, **256,000 atoms, 500 steps**, `timer full`. The **full-node cmmg run
+is the reference** (speedup = 1.00×). "Run mode" is how the binary is actually
+driven: cmmg runs as plain MPI with the standard (non-Kokkos) `pair_style pace`;
+the GPU runs use Kokkos. Only **full-node** CPU and **single-device** GPU runs are
+reported — half-node CPU runs are excluded (see the note below).
 
 | Machine | Config | Run mode | Procs | katom-step/s | Pair % | Comm % | Speedup |
 |---|---|---|--:|--:|--:|--:|--:|
-| **cmmg** | 1 socket (128 cores) | MPI 128×1, non-Kokkos `pace` | 128 | 113 | 96.3 | 3.6 | 1.00× |
-| **viper** | 1× MI300A APU | Kokkos HIP, 1 rank | 1 | **509** | 99.8 | 0.2 | **4.49×** |
-| **raven** | 1× A100 | Kokkos CUDA, 1 rank | 1 | _pending_ | — | — | — |
+| **cmmg** | full node, 2× EPYC 9754 (256 cores) | MPI 256×1, non-Kokkos `pace` | 256 | 393 | 95.4 | 4.5 | 1.00× |
+| **viper** | 1× MI300A APU | Kokkos HIP | 1 | **509** | 99.8 | 0.2 | **1.29×** |
+| **raven** | 1× A100 (40 GB) | Kokkos CUDA | 1 | 360 | 99.9 | 0.1 | 0.92× |
 
-Both completed runs are **compute-bound** (Comm ≤ 4 %), so the benchmark
-measures the ACE force evaluation, not MPI: one MI300A APU ≈ **4.5× one 128-core
-EPYC socket**. The cmmg row is the older one-socket (128-rank) log; the full-node
-number (256 ranks, now the default in `submit-cmmg.slurm`) and the Raven A100
-number are pending. See [STATUS.md](STATUS.md) for live status and next steps.
+Wall time for the 500 steps: cmmg 325 s, viper 251 s, raven 355 s.
+
+**Reading the numbers.** For this ACE `product` kernel a single **MI300A APU is
+~1.4× a single A100** (509 vs 360 katom-step/s) and **1.29× a full 256-core EPYC
+node**; a full EPYC node is itself within ~8 % of one A100. All runs are
+**compute-bound** (Pair ≥ 95 %, Comm ≤ 4.5 %), so the benchmark measures the ACE
+force evaluation, not MPI.
+
+> **Why only full-node CPU runs?** An earlier one-socket (128-core) cmmg run
+> reported just 113 katom-step/s — 3.5× *slower* than the full node for half the
+> cores (strongly super-linear), the fingerprint of a co-scheduled job contending
+> for shared resources on a half-empty node. The full-node run is the trustworthy
+> CPU number. For the same reason the single-GPU runs are best taken on an
+> **exclusive** node allocation (`#SBATCH --exclusive`) to rule out interference
+> from jobs sharing the node. See [STATUS.md](STATUS.md) for live status.
 
 ---
 
