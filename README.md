@@ -59,6 +59,7 @@ LAMMPS-compile-n-bench/
   bench/submit-cmmg.slurm             1 full EPYC node (256 ranks)
   bench/compare-pace.sh               parses logs into a throughput table
   README.md                           this file
+  PACKAGES.md                         full list of compiled packages (+ per-machine matrix)
   STATUS.md                           live build/benchmark status + build gotchas
   LICENSE                             MIT
 ```
@@ -101,7 +102,9 @@ etc.). Read it before your first build.
 The package set is the "Installed packages" list from the central
 `lammps/250722` module, with a few deliberate, hardware-driven exceptions. The
 shared list lives in `cmake/lammps-packages-mpcdf.cmake`; the exceptions are set
-per machine in the build scripts.
+per machine in the build scripts. The **full list of compiled packages** is in
+[PACKAGES.md](PACKAGES.md); the table below covers only the per-machine
+exceptions.
 
 | Package | cmmg (CPU) | viper (HIP) | raven (CUDA) | Reason |
 |---|:--:|:--:|:--:|---|
@@ -179,20 +182,22 @@ which prints a throughput table including the `Pair%` / `Comm%` breakdown from
 
 ## Results so far
 
-PACE, fcc-Cu, **256,000 atoms, 500 steps**, `timer full`. Speedup is relative to
-one 128-core EPYC socket.
+PACE, fcc-Cu, **256,000 atoms, 500 steps**, `timer full`. **cmmg is the reference**
+(speedup = 1.00×). "Run mode" is how the binary is actually driven at run time —
+note cmmg runs as plain MPI with the standard (non-Kokkos) `pair_style pace`,
+while the GPU runs use Kokkos.
 
-| Machine | Config | Procs | katom-step/s | Pair % | Comm % | Speedup |
-|---|---|--:|--:|--:|--:|--:|
-| **viper** | 1× MI300A APU | 1 | **509** | 99.8 | 0.2 | **4.49×** |
-| **cmmg** | 1 socket (128 cores) | 128 | 113 | 96.3 | 3.6 | 1.00× |
-| **raven** | 1× A100 | 1 | _pending_ | — | — | — |
+| Machine | Config | Run mode | Procs | katom-step/s | Pair % | Comm % | Speedup |
+|---|---|---|--:|--:|--:|--:|--:|
+| **cmmg** | 1 socket (128 cores) | MPI 128×1, non-Kokkos `pace` | 128 | 113 | 96.3 | 3.6 | 1.00× |
+| **viper** | 1× MI300A APU | Kokkos HIP, 1 rank | 1 | **509** | 99.8 | 0.2 | **4.49×** |
+| **raven** | 1× A100 | Kokkos CUDA, 1 rank | 1 | _pending_ | — | — | — |
 
 Both completed runs are **compute-bound** (Comm ≤ 4 %), so the benchmark
 measures the ACE force evaluation, not MPI: one MI300A APU ≈ **4.5× one 128-core
-EPYC socket**. The full-node cmmg number (256 ranks, now the default in
-`submit-cmmg.slurm`) and the Raven A100 number are pending; see
-[STATUS.md](STATUS.md) for live status and next steps.
+EPYC socket**. The cmmg row is the older one-socket (128-rank) log; the full-node
+number (256 ranks, now the default in `submit-cmmg.slurm`) and the Raven A100
+number are pending. See [STATUS.md](STATUS.md) for live status and next steps.
 
 ---
 
