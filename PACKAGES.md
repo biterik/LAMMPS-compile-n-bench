@@ -12,15 +12,16 @@ for the rationale behind the per-machine differences.
 
 ## Per-machine differences (the only ones)
 
-| Package | cmmg (CPU) | viper (HIP) | raven (CUDA) | Note |
-|---|:--:|:--:|:--:|---|
-| `INTEL`   | ✗ | ✗ | ✗ | Intel-only; dropped everywhere (AMD CPU, AMD GPU, NVIDIA GPU). |
-| `PLUMED`  | ✓ | ✗ | ✗ | CPU-only, unused by the benchmark; pulls in BLAS/LAPACK + GSL. On only on cmmg (MKL + GSL). |
-| `VORONOI` | ✓ (downloaded) | ✓ (voro++ pre-built with g++) | ✓ (voro++ pre-built with g++) | voro++ can't compile under hipcc/nvcc; GPU builds pre-build it with g++. |
-| `ML-UF3`  | ✓ | ✗ | ✓ (turn off if the CUDA ScatterView assert appears) | Illegal cross-memory-space `ScatterView` copy fails on HIP. |
-| `KOKKOS`  | ✓ (OpenMP) | ✓ (HIP) | ✓ (CUDA) | Backend/arch differ per machine. |
+| Package | cmmg (CPU) | viper (HIP) | raven (CUDA) | raven-cpu (Intel) | Note |
+|---|:--:|:--:|:--:|:--:|---|
+| `INTEL`   | ✗ | ✗ | ✗ | ✓ | Intel AVX-512 optimizations; useless on AMD/CUDA, **on** for the raven-cpu Xeon build (`INTEL_ARCH=cpu`, `icpx`). |
+| `PLUMED`  | ✓ | ✗ | ✗ | ✗ | CPU-only, unused by the benchmark; pulls in BLAS/LAPACK + GSL. On only on cmmg (MKL + GSL). |
+| `VORONOI` | ✓ (downloaded) | ✓ (voro++ pre-built, g++) | ✓ (voro++ pre-built, g++) | ✓ (downloaded) | voro++ can't compile under hipcc/nvcc; GPU builds pre-build it with g++. cmmg/raven-cpu build it normally. |
+| `ML-UF3`  | ✓ | ✗ | ✓ (off if CUDA ScatterView assert) | ✓ | Illegal cross-memory-space `ScatterView` copy fails on HIP; non-Kokkos CPU builds are fine. |
+| `KOKKOS`  | ✓ (OpenMP) | ✓ (HIP) | ✓ (CUDA) | ✗ | raven-cpu uses INTEL/OPENMP/OPT instead of Kokkos. |
+| `KIM`     | ✓ (downloaded) | ✓ (downloaded) | ✓ (pre-built, g++) | ✓ (downloaded) | raven (CUDA) pre-builds KIM with g++ in a conda-free env to avoid a libgfortran clash (gotcha 13). |
 
-Everything below is **built identically on all three machines.**
+Everything below is **built identically on all builds** (modulo the rows above).
 
 ## Packages with no external library
 
@@ -72,12 +73,14 @@ tarballs (see the note at the bottom of
 ```
 LAMMPS_SIZES        = smallbig        (-DLAMMPS_SMALLBIG, matches the reference build)
 BUILD_MPI           = ON
-USE_INTERNAL_LINALG = ON              (avoids an external LAPACK dependency)
-PKG_KOKKOS          = ON              (OpenMP on cmmg, HIP on viper, CUDA on raven)
+USE_INTERNAL_LINALG = ON   (preset default; OFF + MKL on raven-CUDA & raven-cpu)
+PKG_KOKKOS          = ON   (OpenMP cmmg / HIP viper / CUDA raven; OFF on raven-cpu)
+FFT                 = KISS (cmmg/viper) / CUFFT (raven) / MKL (raven-cpu)
 ```
 
 ## Not included
 
 ```
-INTEL    — Intel-only optimizations; unusable on AMD CPU/GPU and the CUDA build.
+INTEL    — excluded on cmmg / viper / raven (AMD CPU, AMD GPU, NVIDIA CUDA);
+           ENABLED on the raven-cpu build (Intel Xeon + oneAPI).
 ```

@@ -15,6 +15,7 @@ build scripts from a `/ptmp/$USER` work dir — they clone + build into `$PWD/la
 | **cmmg** | AMD EPYC 9754 (Zen4c), CPU, Kokkos/OpenMP | ✅ **builds, `lmp` produced** | ✅ **run (full node, 256 ranks)** |
 | **viper** | AMD MI300A APU (gfx942 APU), Kokkos/HIP | ✅ **builds, `lmp` produced** | ✅ **run (1 APU)** |
 | **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | ✅ **builds, `lmp` produced** (external MKL linalg; KIM pre-built; conda-free) | ✅ **run (1 A100)** |
+| **raven-cpu** | Intel Xeon IceLake-SP, CPU, oneAPI + INTEL pkg | 🟡 script ready, modules pinned (intel/2025.3 + impi/2021.17 + mkl/2025.3) — **build pending** | not run yet |
 
 ## Benchmark results (PACE, fcc-Cu, 256k atoms, 500 steps, `timer full`)
 
@@ -26,6 +27,7 @@ runs are reported; the old half-node (128-core) cmmg run is excluded (contended)
 | **cmmg** | full node, 256 cores | 256 | 393 | 95.4% | 4.5% | 325 s | 1.00× |
 | **viper** | 1 MI300A APU | 1 | 509 | 99.8% | 0.2% | 251 s | 1.29× |
 | **raven** | 1 A100 40GB | 1 | 360 | 99.9% | 0.1% | 355 s | 0.92× |
+| **raven-cpu** | full node, 72 Xeon cores (INTEL pkg) | 72 | _pending_ | — | — | — | — |
 
 All runs are **compute-bound** (Pair ≥ 95%) → the benchmark measures the ACE force
 eval, not MPI. For this kernel: **MI300A ≈ 1.4× one A100** (509 vs 360), **1.29× a
@@ -43,16 +45,22 @@ contention-free (ACE is compute-bound, so expect only a small shift).
 All three machines now build **and** have a benchmark result (table above). Builds
 and the first comparison are done. Remaining / optional:
 
-1. **Exclusive GPU re-runs (for rigour).** `submit-viper.slurm` /
+1. **Raven CPU build + benchmark (INTEL package).** New
+   `build-lammps-raven-cpu.sh` + `submit-raven-cpu.slurm`, modules pinned
+   (intel/2025.3 + impi/2021.17 + mkl/2025.3). Run `./build-lammps-raven-cpu.sh`
+   on a login node, then `sbatch bench/submit-raven-cpu.slurm`; fill the
+   `_pending_` raven-cpu row when the log lands. (pace has no intel variant → it's
+   a fair Xeon CPU data point.)
+2. **Exclusive GPU re-runs (for rigour).** `submit-viper.slurm` /
    `submit-raven.slurm` now request `#SBATCH --exclusive`. Re-run both to refresh
    the single-GPU numbers contention-free (ACE is compute-bound, so the shift
    should be small), then update the table if it moves.
-2. **Re-clone build sanity (only if you wipe `lammps/`).** Raven builds clean now;
+3. **Re-clone build sanity (only if you wipe `lammps/`).** Raven builds clean now;
    if you ever `rm -rf lammps/build-raven`, just re-run
    `bash mpcdf-lammps/build-lammps-raven.sh`. `ML-UF3` is ON and built fine —
    disable with `-D PKG_ML-UF3=off` only if a re-clone hits the CUDA ScatterView
    assertion (gotcha 10).
-3. **Longer / larger runs.** To stress the GPUs more, raise `-var nsteps` (or
+4. **Longer / larger runs.** To stress the GPUs more, raise `-var nsteps` (or
    `nx/ny/nz`); keep atoms×steps identical across machines for a fair compare,
    and re-run `bash mpcdf-lammps/bench/compare-pace.sh` to regenerate the table.
 
@@ -86,6 +94,14 @@ and the first comparison are done. Remaining / optional:
   `hipcc-cxx17` wrapper** (not bare hipcc) that strips CMake's `-std=c++98` probe
   flag, appends `-std=c++17`, and pins `--offload-arch=gfx942` — see gotchas 8–9.
   `ML-UF3` is **off** (gotcha 10). Runtime needs **`HSA_XNACK=1`** (gotcha 11).
+- **raven-cpu** (Intel Xeon nodes, no GPU): `module load intel/2025.3
+  impi/2021.17 mkl/2025.3 cmake` (confirmed on Raven; impi is hierarchical — it
+  resolves only after the intel module, gotcha 2). Intel oneAPI via `mpiicpx`/`mpiicpc`
+  with `I_MPI_CXX=icpx`. **INTEL package on** (`-D PKG_INTEL=on -D
+  INTEL_ARCH=cpu`), no Kokkos, external MKL (`USE_INTERNAL_LINALG=off`,
+  `FFT=MKL`), `-xCORE-AVX512 -qopt-zmm-usage=high`. Benchmark runs one full node
+  (72 ranks) with `-pk intel 0 omp 1 -sf intel`; `pair_style pace` has no intel
+  variant so it falls back to the standard CPU ACE kernel (fair Xeon CPU point).
 
 ## Packages: PLUMED and VORONOI are special
 
@@ -176,10 +192,14 @@ and the first comparison are done. Remaining / optional:
 - `build-lammps-{cmmg,raven,viper}.sh` — per-machine build scripts. Each now
   **tees all output to `build-<machine>-<timestamp>.log`**. The viper script also
   generates the `hipcc-cxx17` wrapper in the run dir (see gotchas 8–9).
+- `build-lammps-raven-cpu.sh` — Raven **CPU** build: Intel oneAPI (`icpx`) + Intel
+  MPI + MKL, **INTEL package on**, no Kokkos. For the Xeon nodes, not the A100s.
 - `bench/in.pace_bench` — fcc-Cu, 256k atoms, `pair_style pace product`,
   `nsteps 500` (default; sized so cmmg finishes in the wall limit), `timer full`.
 - `bench/submit-{cmmg,raven,viper}.slurm` — cmmg = full node (256 ranks),
-  raven/viper = single GPU. viper sets `HSA_XNACK=1`.
+  raven/viper = single GPU (now `--exclusive`). viper sets `HSA_XNACK=1`.
+- `bench/submit-raven-cpu.slurm` — one full Raven CPU node (72 ranks, `--exclusive`),
+  INTEL package engaged (`-pk intel 0 omp 1 -sf intel`).
 - `bench/compare-pace.sh` — parses the logs into a throughput table (now also
   reports `pair%` / `comm%` from the `timer full` breakdown).
 - `README.md` — usage; this `STATUS.md` — current state + next steps.

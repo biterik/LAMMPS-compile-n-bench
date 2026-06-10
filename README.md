@@ -23,6 +23,11 @@ that runs *unmodified* on all of them so the results are apples-to-apples.
 | **cmmg** | 2× AMD EPYC 9754 (Zen4c), CPU | OpenMP | `ZEN4` | `g++` (`-march=znver4`) |
 | **viper** | AMD Instinct MI300A APU (gfx942) | HIP | `AMD_GFX942_APU` | `hipcc` (wrapper) |
 | **raven** | NVIDIA A100 40 GB (Ampere) | CUDA | `AMPERE80` | `nvcc_wrapper` / g++13 |
+| **raven-cpu** | 2× Intel Xeon IceLake-SP (AVX-512), CPU | — (MPI + INTEL/OpenMP) | — | `icpx` (oneAPI, `-xCORE-AVX512`) |
+
+The **raven-cpu** build is the odd one out: it targets Raven's Intel Xeon CPU
+nodes (not the A100s) with the Intel oneAPI toolchain and the LAMMPS **INTEL**
+package enabled — see [the package table below](#why-some-packages-are-built-on-some-machines-but-not-others).
 
 ### The target machines
 
@@ -36,6 +41,8 @@ that runs *unmodified* on all of them so the results are apples-to-apples.
   [User guide](https://docs.mpcdf.mpg.de/doc/computing/raven-user-guide.html) ·
   [Hardware details](https://docs.mpcdf.mpg.de/doc/computing/raven-details.html).
   GPU nodes carry 4× A100 40 GB SXM (NVLink); this benchmark uses a single A100.
+  Raven's **CPU** nodes have 2× Intel Xeon IceLake-SP Platinum 8360Y (72 cores,
+  AVX-512); the `raven-cpu` build/benchmark targets one full CPU node.
 - **cmmg** (AMD EPYC 9754) — compute cluster of the
   [Max Planck Institute for Sustainable Materials (MPIE)](https://www.mpie.de/4065158/Hardware),
   operated with MPCDF. Nodes have 2× 128-core EPYC 9754 (256 cores) and 768 GB
@@ -51,11 +58,13 @@ General MPCDF HPC documentation: <https://docs.mpcdf.mpg.de/doc/computing/>.
 LAMMPS-compile-n-bench/
   cmake/lammps-packages-mpcdf.cmake   shared package set (used by all builds)
   build-lammps-viper.sh               Viper-GPU: KOKKOS + HIP   (MI300A, gfx942 APU)
-  build-lammps-raven.sh               Raven:     KOKKOS + CUDA  (A100, AMPERE80)
+  build-lammps-raven.sh               Raven-GPU: KOKKOS + CUDA  (A100, AMPERE80)
+  build-lammps-raven-cpu.sh           Raven-CPU: Intel oneAPI + INTEL pkg (Xeon IceLake)
   build-lammps-cmmg.sh                cmmg:      CPU, KOKKOS/OpenMP (EPYC Zen4)
   bench/in.pace_bench                 PACE fcc-Cu benchmark input (CPU + GPU)
-  bench/submit-viper.slurm            1× MI300A APU
-  bench/submit-raven.slurm            1× A100
+  bench/submit-viper.slurm            1× MI300A APU (exclusive node)
+  bench/submit-raven.slurm            1× A100 (exclusive node)
+  bench/submit-raven-cpu.slurm        1 full Raven CPU node (72 ranks, INTEL pkg)
   bench/submit-cmmg.slurm             1 full EPYC node (256 ranks)
   bench/compare-pace.sh               parses logs into a throughput table
   README.md                           this file
@@ -78,9 +87,10 @@ internet, which compute nodes don't have.
 
 ```bash
 # copy this folder to the cluster, then, from a /ptmp/$USER work dir:
-./build-lammps-viper.sh     # on viper login nodes
-./build-lammps-raven.sh     # on raven login nodes
-./build-lammps-cmmg.sh      # on cmmg login nodes
+./build-lammps-viper.sh       # on viper login nodes (GPU)
+./build-lammps-raven.sh       # on raven login nodes (A100 GPU)
+./build-lammps-raven-cpu.sh   # on raven login nodes (Xeon CPU + INTEL package)
+./build-lammps-cmmg.sh        # on cmmg login nodes (EPYC CPU)
 ```
 
 The clone and build land in the directory you launch from:
@@ -91,9 +101,9 @@ long compile (tens of minutes). Each script tees its output to
 `build-<machine>-<timestamp>.log`.
 
 Per-machine module stacks and the exact, confirmed-working CMake flags are
-documented in **[STATUS.md](STATUS.md)**, along with 11 hard-won build gotchas
+documented in **[STATUS.md](STATUS.md)**, along with 14 hard-won build gotchas
 (the `#!/bin/bash -l` trap, the `hipcc-cxx17` wrapper, `HSA_XNACK=1` at runtime,
-etc.). Read it before your first build.
+external MKL under nvcc, conda/libgfortran, etc.). Read it before your first build.
 
 ---
 
@@ -106,12 +116,17 @@ per machine in the build scripts. The **full list of compiled packages** is in
 [PACKAGES.md](PACKAGES.md); the table below covers only the per-machine
 exceptions.
 
-| Package | cmmg (CPU) | viper (HIP) | raven (CUDA) | Reason |
-|---|:--:|:--:|:--:|---|
-| **INTEL** | ✗ | ✗ | ✗ | Intel-only optimizations. Both AMD machines and the CUDA build can't use it, so it's dropped everywhere. |
-| **PLUMED** | ✓ | ✗ | ✗ | CPU-only and **unused by the benchmark**. It also pulls in BLAS/LAPACK + GSL. Enabled only on cmmg (MKL 2025.2 + GSL 2.7); omitted on the GPU machines to avoid the dependency. |
-| **VORONOI** | ✓ | ✓ | ✓ | Kept on all three, **but** voro++ can't be compiled by `nvcc`/`hipcc`. The GPU scripts pre-build voro++ with `g++` and pass it via `-D DOWNLOAD_VORO=off -D VORO_LIBRARY=… -D VORO_INCLUDE_DIR=…`. cmmg builds it normally. |
-| **ML-UF3** | ✓ | ✗ | ⚠️ | `pair_uf3_kokkos.cpp` builds a `HostSpace` `ScatterView` from a device view — an illegal cross-memory-space copy that fails a static assert on HIP. Disabled on viper; disable on raven too if the same CUDA assertion appears. Unused by the benchmark. |
+| Package | cmmg (CPU) | viper (HIP) | raven (CUDA) | raven-cpu (Intel) | Reason |
+|---|:--:|:--:|:--:|:--:|---|
+| **INTEL** | ✗ | ✗ | ✗ | ✓ | Intel-only AVX-512 optimizations. Useless on the AMD CPU/GPU and the CUDA build — but **on for the raven-cpu** Xeon build (`INTEL_ARCH=cpu`, compiled with `icpx`). |
+| **PLUMED** | ✓ | ✗ | ✗ | ✗ | CPU-only and **unused by the benchmark**; pulls in BLAS/LAPACK + GSL. On only on cmmg (MKL + GSL); off elsewhere to avoid the dependency. |
+| **VORONOI** | ✓ | ✓ | ✓ | ✓ | Kept everywhere, **but** voro++ can't be compiled by `nvcc`/`hipcc`. The GPU scripts pre-build voro++ with `g++`; cmmg and raven-cpu build it normally (`icpx` compiles it fine). |
+| **ML-UF3** | ✓ | ✗ | ⚠️ | ✓ | `pair_uf3_kokkos.cpp` builds a `HostSpace` `ScatterView` from a device view — illegal on HIP. Disabled on viper; disable on raven (CUDA) too if the assertion appears. Non-Kokkos CPU builds are fine. |
+| **KOKKOS** | ✓ (OpenMP) | ✓ (HIP) | ✓ (CUDA) | ✗ | The raven-cpu build uses INTEL/OPENMP/OPT acceleration instead of Kokkos. |
+
+The raven-cpu build also links **external MKL** (`USE_INTERNAL_LINALG=off`,
+`FFT=MKL`) rather than the bundled linalg/KISS FFT, since the Intel toolchain
+ships MKL anyway.
 
 Two more architecture facts worth knowing (full detail in STATUS.md):
 
@@ -145,10 +160,16 @@ and the submit script there:
 cp LAMMPS-compile-n-bench/bench/in.pace_bench .
 cp lammps/potentials/Cu-PBE-core-rep.ace .
 
-sbatch LAMMPS-compile-n-bench/bench/submit-cmmg.slurm     # 1 full EPYC node (256 ranks)
-sbatch LAMMPS-compile-n-bench/bench/submit-raven.slurm    # 1 A100
-sbatch LAMMPS-compile-n-bench/bench/submit-viper.slurm    # 1 MI300A APU (sets HSA_XNACK=1)
+sbatch LAMMPS-compile-n-bench/bench/submit-cmmg.slurm       # 1 full EPYC node (256 ranks)
+sbatch LAMMPS-compile-n-bench/bench/submit-raven.slurm      # 1 A100 (exclusive node)
+sbatch LAMMPS-compile-n-bench/bench/submit-raven-cpu.slurm  # 1 full Raven CPU node (72 ranks, INTEL pkg)
+sbatch LAMMPS-compile-n-bench/bench/submit-viper.slurm      # 1 MI300A APU (sets HSA_XNACK=1)
 ```
+
+The `raven-cpu` run engages the INTEL package (`-pk intel 0 omp 1 -sf intel`).
+`pair_style pace` has no INTEL-accelerated variant, so the ACE kernel runs as the
+standard CPU style — the run is a fair Intel-Xeon CPU data point, not a showcase
+of INTEL-package speedup (which applies to styles like `eam`, `sw`, `lj/*`).
 
 (Or set `LMP=/full/path/to/lmp` when submitting, and `cd` wherever you keep the
 input.) The dev partitions (`apudev`, `gpudev`) cap at 15 min, which is fine for
@@ -193,6 +214,7 @@ reported — half-node CPU runs are excluded (see the note below).
 | **cmmg** | full node, 2× EPYC 9754 (256 cores) | MPI 256×1, non-Kokkos `pace` | 256 | 393 | 95.4 | 4.5 | 1.00× |
 | **viper** | 1× MI300A APU | Kokkos HIP | 1 | **509** | 99.8 | 0.2 | **1.29×** |
 | **raven** | 1× A100 (40 GB) | Kokkos CUDA | 1 | 360 | 99.9 | 0.1 | 0.92× |
+| **raven-cpu** | full node, 2× Xeon IceLake (72 cores) | MPI 72×1, INTEL pkg | 72 | _pending_ | — | — | — |
 
 Wall time for the 500 steps: cmmg 325 s, viper 251 s, raven 355 s.
 
