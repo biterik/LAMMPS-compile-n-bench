@@ -16,7 +16,7 @@ build scripts from a `/ptmp/$USER` work dir — they clone + build into `$PWD/la
 | **viper** | AMD MI300A APU (gfx942 APU), Kokkos/HIP | ✅ **builds, `lmp_viper`** | ✅ **run (1 APU)** |
 | **viper-cpu** | AMD EPYC 9554 (Zen4 Genoa), CPU, Kokkos/OpenMP | 🟡 script ready, modules confirmed (gcc/14 + openmpi/5.0) — **build pending** | not run yet |
 | **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | ✅ **builds, `lmp_raven`** (external MKL linalg; KIM pre-built; conda-free) | ✅ **run (1 A100)** |
-| **raven-cpu** | Intel Xeon IceLake-SP, CPU, oneAPI + INTEL pkg | 🟡 script ready, modules pinned (intel/2025.3 + impi/2021.17 + mkl/2025.3) — **build pending** | not run yet |
+| **raven-cpu** | Intel Xeon IceLake-SP, CPU, oneAPI + INTEL pkg | ✅ **builds, `lmp_raven_cpu`** (intel/2025.3 + impi/2021.17 + mkl/2025.3; benign KIM warnings, gotcha 15) | not run yet |
 
 > All builds now emit a distinctly-named binary `lmp_<machine>` (LAMMPS_MACHINE)
 > in `lammps/build-<machine>/`, so nothing overwrites anything.
@@ -196,6 +196,21 @@ and the first comparison are done. Remaining / optional:
     unused code, none affecting the binary. They're quieted with
     `-D CMAKE_CXX_FLAGS="-diag-suppress 177,550,611,186,20011"` so genuine
     warnings stand out. Remove that flag if you want to see them again.
+15. **raven-cpu (Intel) build emits a flood of benign KIM warnings.** The
+    auto-downloaded KIM-API builds its Fortran with the **system GCC-7**
+    binutils/gfortran (`/usr/lib64/gcc/x86_64-suse-linux/7/...ld`) rather than the
+    loaded oneAPI toolchain, producing hundreds of linker warnings
+    *"alignment 4 of normal symbol `KIM_…` is smaller than 8 … alignment
+    discrepancies can cause real problems. Investigation is advised."* These are a
+    long-standing, harmless KIM C↔Fortran enum-alignment quirk (the symbols are
+    integer name-constants); the "investigation advised" text is generic binutils
+    boilerplate. Plus cosmetic `ifx` name-too-long (`#5462`) in KIM *example*
+    models, and icpx `-Wvla-cxx-extension` / `-Wnontrivial-memcall` /
+    `loop not vectorized` in the INTEL & PACE code. **None affect the binary**, and
+    KIM is unused by the PACE benchmark. To silence the flood, either build with
+    `-D PKG_KIM=off` (simplest; KIM not needed for the benchmark) or pre-build
+    KIM with a single consistent toolchain (the raven-GPU pattern). Left ON by
+    default for package parity with the other machines.
 
 ## File map (`mpcdf-lammps/`)
 
