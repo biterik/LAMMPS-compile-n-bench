@@ -13,6 +13,7 @@ build scripts from a `/ptmp/$USER` work dir — they clone + build into `$PWD/la
 | Machine | HW / backend | Build status | Benchmark |
 |---|---|---|---|
 | **cmmg** | AMD EPYC 9754 (Zen4c), CPU, Kokkos/OpenMP | ✅ **builds, `lmp` produced** | ✅ **run (full node, 256 ranks)** |
+| **cmti** | Intel Xeon Gold 6230 (Cascade Lake), CPU, oneAPI + INTEL pkg | ⚪ **scripts ready, not built yet** | ⏳ pending |
 | **viper** | AMD MI300A APU (gfx942 APU), Kokkos/HIP | ✅ **builds, `lmp_viper`** | ✅ **run (1 APU)** |
 | **viper-cpu** | AMD EPYC 9554 (Zen4 Genoa), CPU, Kokkos/OpenMP | ✅ **builds, `lmp_viper_cpu`** | ✅ **run (full node, 128 cores)** |
 | **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | ✅ **builds, `lmp_raven`** (external MKL linalg; KIM pre-built; conda-free) | ✅ **run (1 A100)** |
@@ -93,6 +94,13 @@ and the first comparison are done. Remaining / optional:
 - **cmmg**: `module load gcc/13 impi/2021.16 cmake/3.30 mkl/2025.2 gsl/2.7`.
   MPI wrappers are **`mpigcc` / `mpig++`** (NOT mpicc/mpicxx), found under
   `$I_MPI_ROOT/bin`. Kokkos OpenMP + `Kokkos_ARCH_ZEN4`, `-march=znver4`.
+- **cmti** (Intel Xeon Gold 6230 nodes of the *same* Sustainable-Materials cluster
+  as cmmg): **Intel oneAPI build, mirrors raven-cpu** — `module load intel/2025.2
+  impi/2021.16 mkl/2025.2 cmake/3.30` (⚠ confirm impi version with
+  `module load intel/2025.2 && module avail impi`), `icpx`/`icx` via `mpiicpx`,
+  INTEL package on (`INTEL_ARCH=cpu`), no Kokkos, external MKL + `FFT=MKL`,
+  `-xCORE-AVX512 -qopt-zmm-usage=high`, PLUMED off. Partition `p.cmfe` (full node =
+  40 cores), binary `lmp_cmti`, run with `-pk intel 0 omp 1 -sf intel`.
 - **raven**: `module load gcc/13 cuda/12.6 openmpi_gpu/5.0 cmake mkl/2025.2`.
   Kokkos CUDA, `Kokkos_ARCH_AMPERE80`, via `nvcc_wrapper` (set as `OMPI_CXX`,
   `CXX=mpicxx`). Uses **external MKL** linalg (`USE_INTERNAL_LINALG=off`, gotcha
@@ -220,6 +228,11 @@ and the first comparison are done. Remaining / optional:
 - `build-lammps-{cmmg,raven,viper}.sh` — per-machine build scripts. Each now
   **tees all output to `build-<machine>-<timestamp>.log`**. The viper script also
   generates the `hipcc-cxx17` wrapper in the run dir (see gotchas 8–9).
+- `build-lammps-cmti.sh` — **cmti** build: Intel Xeon Gold 6230 (Cascade Lake) nodes
+  of the cmmg cluster. **Intel oneAPI build, mirrors raven-cpu** (`icpx` + Intel MPI +
+  MKL, INTEL package on, no Kokkos), pinned to intel/2025.2 + mkl/2025.2 + impi/2021.16,
+  `-xCORE-AVX512`, binary `lmp_cmti`. Matching `bench/submit-cmti.slurm` (1 full node,
+  40 ranks, `-sf intel`).
 - `build-lammps-raven-cpu.sh` — Raven **CPU** build: Intel oneAPI (`icpx`) + Intel
   MPI + MKL, **INTEL package on**, no Kokkos. For the Xeon nodes, not the A100s.
 - `build-lammps-viper-cpu.sh` — Viper **CPU** build: gcc + OpenMPI, Kokkos/OpenMP,

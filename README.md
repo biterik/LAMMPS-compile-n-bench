@@ -21,6 +21,7 @@ that runs *unmodified* on all of them so the results are apples-to-apples.
 | Build (binary) | Hardware | Kokkos backend | Kokkos arch | Compiler |
 |---|---|---|---|---|
 | **cmmg** (`lmp_cmmg`) | 2× AMD EPYC 9754 (Zen4c), CPU | OpenMP | `ZEN4` | `g++` (`-march=znver4`) |
+| **cmti** (`lmp_cmti`) | 2× Intel Xeon Gold 6230 (Cascade Lake), CPU | — (MPI + INTEL/OpenMP) | — | `icpx` (oneAPI, `-xCORE-AVX512`) |
 | **viper** (`lmp_viper`) | AMD Instinct MI300A APU (gfx942) | HIP | `AMD_GFX942_APU` | `hipcc` (wrapper) |
 | **viper-cpu** (`lmp_viper_cpu`) | 2× AMD EPYC 9554 (Zen4 Genoa), CPU | OpenMP | `ZEN4` | `g++` (`-march=znver4`) |
 | **raven** (`lmp_raven`) | NVIDIA A100 40 GB (Ampere) | CUDA | `AMPERE80` | `nvcc_wrapper` / g++13 |
@@ -50,10 +51,15 @@ with the Intel oneAPI toolchain and the LAMMPS **INTEL** package enabled — see
   GPU nodes carry 4× A100 40 GB SXM (NVLink); this benchmark uses a single A100.
   Raven's **CPU** nodes have 2× Intel Xeon IceLake-SP Platinum 8360Y (72 cores,
   AVX-512); the `raven-cpu` build/benchmark targets one full CPU node.
-- **cmmg** (AMD EPYC 9754) — compute cluster of the
+- **cmmg / cmti** (AMD EPYC 9754 / Intel Xeon Gold 6230) — two partitions of the
+  same compute cluster of the
   [Max Planck Institute for Sustainable Materials (MPIE)](https://www.mpie.de/4065158/Hardware),
-  operated with MPCDF. Nodes have 2× 128-core EPYC 9754 (256 cores) and 768 GB
-  RAM. This benchmark uses one full node.
+  operated with MPCDF
+  ([cluster docs](https://docs.mpcdf.mpg.de/doc/computing/clusters/systems/Sustainable_Materials.html)).
+  The **cmmg** nodes have 2× 128-core EPYC 9754 (256 cores, Zen4c) and 768 GB RAM
+  (partition `p.cmmg`); the older **cmti** nodes have 2× 20-core Xeon Gold 6230
+  (40 cores, Cascade Lake, AVX-512) (partition `p.cmfe`). Each benchmark uses one
+  full node.
 
 General MPCDF HPC documentation: <https://docs.mpcdf.mpg.de/doc/computing/>.
 
@@ -69,12 +75,14 @@ LAMMPS-compile-n-bench/
   build-lammps-raven.sh               Raven-GPU: KOKKOS + CUDA  (A100)  -> lmp_raven
   build-lammps-raven-cpu.sh           Raven-CPU: Intel oneAPI + INTEL pkg -> lmp_raven_cpu
   build-lammps-cmmg.sh                cmmg:      CPU, KOKKOS/OpenMP (EPYC) -> lmp_cmmg
+  build-lammps-cmti.sh                cmti:      CPU, Intel oneAPI + INTEL pkg (Xeon CLX) -> lmp_cmti
   bench/in.pace_bench                 PACE fcc-Cu benchmark input (CPU + GPU)
   bench/submit-viper.slurm            1× MI300A APU (exclusive node)
   bench/submit-viper-cpu.slurm        1 full Viper CPU node (128 ranks)
   bench/submit-raven.slurm            1× A100 (exclusive node)
   bench/submit-raven-cpu.slurm        1 full Raven CPU node (72 ranks, INTEL pkg)
   bench/submit-cmmg.slurm             1 full EPYC node (256 ranks)
+  bench/submit-cmti.slurm             1 full Xeon node (40 ranks)
   bench/compare-pace.sh               parses logs into a throughput table
   README.md                           this file
   PACKAGES.md                         full list of compiled packages (+ per-machine matrix)
@@ -101,6 +109,7 @@ internet, which compute nodes don't have.
 ./build-lammps-raven.sh       # on raven login nodes (A100 GPU)
 ./build-lammps-raven-cpu.sh   # on raven login nodes (Xeon CPU + INTEL package)
 ./build-lammps-cmmg.sh        # on cmmg login nodes (EPYC CPU)
+./build-lammps-cmti.sh        # on cmti login nodes (Xeon Cascade-Lake CPU; same cluster as cmmg)
 ```
 
 The clone and build land in the directory you launch from:
@@ -118,6 +127,7 @@ Every build sets the LAMMPS `LAMMPS_MACHINE` option, so the executable is named
 | Build | Directory | Binary |
 |---|---|---|
 | cmmg | `lammps/build-cmmg/` | `lmp_cmmg` |
+| cmti | `lammps/build-cmti/` | `lmp_cmti` |
 | viper | `lammps/build-viper/` | `lmp_viper` |
 | viper-cpu | `lammps/build-viper-cpu/` | `lmp_viper_cpu` |
 | raven | `lammps/build-raven/` | `lmp_raven` |
@@ -156,6 +166,13 @@ The raven-cpu build also links **external MKL** (`USE_INTERNAL_LINALG=off`,
 `FFT=MKL`) rather than the bundled linalg/KISS FFT, since the Intel toolchain
 ships MKL anyway.
 
+**cmti** follows the **same recipe as raven-cpu** (Intel oneAPI `icpx` + Intel MPI +
+MKL, **INTEL package on**, no Kokkos, external MKL linalg + `FFT=MKL`, PLUMED off),
+just pinned to cmti's `intel/2025.2 + impi/2021.16 + mkl/2025.2` and the
+Cascade-Lake arch (`-xCORE-AVX512`), on partition `p.cmfe`. Like raven-cpu, the
+INTEL package doesn't speed up `pair_style pace` (no intel variant) — it's a fair
+Intel-Xeon CPU data point on the older Cascade-Lake silicon.
+
 Two more architecture facts worth knowing (full detail in STATUS.md):
 
 - **PACE on GPU requires the `product` algorithm** (`recursive` is
@@ -189,6 +206,7 @@ cp LAMMPS-compile-n-bench/bench/in.pace_bench .
 cp lammps/potentials/Cu-PBE-core-rep.ace .
 
 sbatch LAMMPS-compile-n-bench/bench/submit-cmmg.slurm       # 1 full EPYC node (256 ranks)
+sbatch LAMMPS-compile-n-bench/bench/submit-cmti.slurm       # 1 full Xeon node (40 ranks)
 sbatch LAMMPS-compile-n-bench/bench/submit-raven.slurm      # 1 A100 (exclusive node)
 sbatch LAMMPS-compile-n-bench/bench/submit-raven-cpu.slurm  # 1 full Raven CPU node (72 ranks, INTEL pkg)
 sbatch LAMMPS-compile-n-bench/bench/submit-viper.slurm      # 1 MI300A APU (sets HSA_XNACK=1)
@@ -243,6 +261,7 @@ reported — half-node CPU runs are excluded (see the note below).
 | **cmmg** | full node, 2× EPYC 9754 (256 cores) | MPI 256×1, non-Kokkos `pace` | 256 | 393 | 95.4 | 4.5 | 1.00× |
 | **viper-cpu** | full node, 2× EPYC 9554 (128 cores) | MPI 128×1, non-Kokkos `pace` | 128 | 402 | 96.4 | 3.5 | 1.02× |
 | **raven-cpu** | full node, 2× Xeon IceLake (72 cores) | MPI 72×1, INTEL pkg | 72 | 129 | 96.2 | 3.7 | 0.33× |
+| **cmti** | full node, 2× Xeon Gold 6230 (40 cores) | MPI 40×1, non-Kokkos `pace` | 40 | _pending_ | — | — | _pending_ |
 | **viper** | 1× MI300A APU | Kokkos HIP | 1 | **509** | 99.8 | 0.2 | **1.29×** |
 | **raven** | 1× A100 (40 GB) | Kokkos CUDA | 1 | 360 | 99.9 | 0.1 | 0.92× |
 
