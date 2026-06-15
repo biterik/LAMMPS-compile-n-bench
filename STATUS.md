@@ -13,7 +13,7 @@ build scripts from a `/ptmp/$USER` work dir — they clone + build into `$PWD/la
 | Machine | HW / backend | Build status | Benchmark |
 |---|---|---|---|
 | **cmmg** | AMD EPYC 9754 (Zen4c), CPU, Kokkos/OpenMP | ✅ **builds, `lmp` produced** | ✅ **run (full node, 256 ranks)** |
-| **cmti** | Intel Xeon Gold 6230 (Cascade Lake), CPU, oneAPI + INTEL pkg | ⚪ **scripts ready, not built yet** | ⏳ pending |
+| **cmti** | Intel Xeon Gold 6230 (Cascade Lake), CPU, oneAPI + INTEL pkg | ✅ **builds, `lmp_cmti`** | ✅ **run (full node, 40 cores)** |
 | **viper** | AMD MI300A APU (gfx942 APU), Kokkos/HIP | ✅ **builds, `lmp_viper`** | ✅ **run (1 APU)** |
 | **viper-cpu** | AMD EPYC 9554 (Zen4 Genoa), CPU, Kokkos/OpenMP | ✅ **builds, `lmp_viper_cpu`** | ✅ **run (full node, 128 cores)** |
 | **raven** | NVIDIA A100 (AMPERE80), Kokkos/CUDA | ✅ **builds, `lmp_raven`** (external MKL linalg; KIM pre-built; conda-free) | ✅ **run (1 A100)** |
@@ -29,17 +29,20 @@ runs are reported; the old half-node (128-core) cmmg run is excluded (contended)
 
 | Machine | config | procs | katom-step/s | Pair% | Comm% | wall | speedup |
 |---|---|---|---|---|---|---|---|
-| **cmmg** | full node, 256 cores | 256 | 393 | 95.4% | 4.5% | 325 s | 1.00× |
+| **cmmg** | full node, 256 EPYC 9754 cores | 256 | 393 | 95.4% | 4.5% | 325 s | 1.00× |
+| **cmti** | full node, 40 Xeon Gold 6230 cores (INTEL pkg) | 40 | 62 | 98.1% | 1.8% | 2049 s | 0.16× |
+| **raven-cpu** | full node, 72 Xeon IceLake cores (INTEL pkg) | 72 | 129 | 96.2% | 3.7% | 990 s | 0.33× |
 | **viper-cpu** | full node, 128 EPYC 9554 cores | 128 | 402 | 96.4% | 3.5% | 318 s | 1.02× |
-| **raven-cpu** | full node, 72 Xeon cores (INTEL pkg) | 72 | 129 | 96.2% | 3.7% | 990 s | 0.33× |
-| **viper** | 1 MI300A APU | 1 | 509 | 99.8% | 0.2% | 251 s | 1.29× |
 | **raven** | 1 A100 40GB | 1 | 360 | 99.9% | 0.1% | 355 s | 0.92× |
+| **viper** | 1 MI300A APU | 1 | 509 | 99.8% | 0.2% | 251 s | 1.29× |
 
 All runs are **compute-bound** (Pair ≥ 95%) → the benchmark measures the ACE force
 eval, not MPI. For this kernel: **MI300A ≈ 1.4× one A100** (509 vs 360), **1.29× a
 full 256-core EPYC node**. Among CPU nodes, a **128-core Genoa node ≈ a 256-core
-Bergamo node** (Genoa Zen4 cores ~2× the Zen4c cores), and the **72-core Xeon
-IceLake node** is slowest (129, ~3× behind the EPYC nodes).
+Bergamo node** (Genoa Zen4 cores ~2× the Zen4c cores); the **72-core Xeon IceLake
+node** (129) and the **40-core Xeon Cascade-Lake cmti node** (62) trail, cmti
+slowest overall. Per-core: Genoa ≈ 3.1, IceLake ≈ 1.8, Cascade-Lake ≈ 1.6,
+Zen4c ≈ 1.5 — cmti's low total is its small core count, not weak cores.
 
 **Caveat (Erik's rule: full nodes only).** The earlier 1-socket cmmg run gave 113
 katom-step/s — 3.5× slower than the full node for half the cores, i.e. super-linear,

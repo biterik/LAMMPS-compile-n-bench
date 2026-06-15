@@ -259,24 +259,27 @@ reported — half-node CPU runs are excluded (see the note below).
 | Machine | Config | Run mode | Procs | katom-step/s | Pair % | Comm % | Speedup |
 |---|---|---|--:|--:|--:|--:|--:|
 | **cmmg** | full node, 2× EPYC 9754 (256 cores) | MPI 256×1, non-Kokkos `pace` | 256 | 393 | 95.4 | 4.5 | 1.00× |
-| **viper-cpu** | full node, 2× EPYC 9554 (128 cores) | MPI 128×1, non-Kokkos `pace` | 128 | 402 | 96.4 | 3.5 | 1.02× |
+| **cmti** | full node, 2× Xeon Gold 6230 (40 cores) | MPI 40×1, INTEL pkg | 40 | 62 | 98.1 | 1.8 | 0.16× |
 | **raven-cpu** | full node, 2× Xeon IceLake (72 cores) | MPI 72×1, INTEL pkg | 72 | 129 | 96.2 | 3.7 | 0.33× |
-| **cmti** | full node, 2× Xeon Gold 6230 (40 cores) | MPI 40×1, non-Kokkos `pace` | 40 | _pending_ | — | — | _pending_ |
-| **viper** | 1× MI300A APU | Kokkos HIP | 1 | **509** | 99.8 | 0.2 | **1.29×** |
+| **viper-cpu** | full node, 2× EPYC 9554 (128 cores) | MPI 128×1, non-Kokkos `pace` | 128 | 402 | 96.4 | 3.5 | 1.02× |
 | **raven** | 1× A100 (40 GB) | Kokkos CUDA | 1 | 360 | 99.9 | 0.1 | 0.92× |
+| **viper** | 1× MI300A APU | Kokkos HIP | 1 | **509** | 99.8 | 0.2 | **1.29×** |
 
-Wall time for the 500 steps: cmmg 325 s, viper-cpu 318 s, raven-cpu 990 s,
-viper 251 s, raven 355 s.
+Wall time for the 500 steps: cmmg 325 s, cmti 2049 s, raven-cpu 990 s,
+viper-cpu 318 s, raven 355 s, viper 251 s.
 
 **Reading the numbers.** For this ACE `product` kernel a single **MI300A APU is
 ~1.4× a single A100** (509 vs 360 katom-step/s) and **1.29× a full 256-core EPYC
 node**. Among the CPU nodes, a full **Viper EPYC-Genoa node (128 cores) ≈ a full
 cmmg EPYC-Bergamo node (256 cores)** — the Genoa cores (full Zen4, higher clock)
 are roughly twice as fast each as the denser Zen4c cores, so half as many keep
-pace. The **Raven Xeon-IceLake node** is the slowest (129; older, 72 cores), ~3×
-behind the EPYC nodes and ~4× behind one A100. All runs are **compute-bound**
-(Pair ≥ 95 %, Comm ≤ 4.5 %), so the benchmark measures the ACE force evaluation,
-not MPI.
+pace. The **Raven Xeon-IceLake node** (129; 72 cores) and the older, smaller
+**cmti Xeon Cascade-Lake node** (62; 40 cores) trail the field — cmti is the
+slowest overall, ~6× behind cmmg and ~8× behind one MI300A. Per core the picture
+is tighter: Genoa ≈ 3.1, IceLake ≈ 1.8, Cascade-Lake ≈ 1.6, Zen4c ≈ 1.5
+katom-step/s/core — so cmti's low total is mostly its small core count (40), not
+weak cores. All runs are **compute-bound** (Pair ≥ 95 %, Comm ≤ 4.5 %), so the
+benchmark measures the ACE force evaluation, not MPI.
 
 > **Why only full-node CPU runs?** An earlier one-socket (128-core) cmmg run
 > reported just 113 katom-step/s — 3.5× *slower* than the full node for half the
