@@ -19,3 +19,4 @@ bench/*.ace
 *~
 *.swp
 *.bak
+log.pace_cmti
