@@ -22,7 +22,9 @@
 # or point TF_LIB_FILE directly at a libtensorflow_cc.so.2. See GRACE.md.
 #
 # RUN THIS ON A LOGIN NODE (cmti001/002): internet only on login nodes.
-# Builds and git-clones into the directory you launch it from (not $HOME).
+# Builds + git-clones into the cmmg scratch by default — WORK=/u/$USER/PTMP/gracework
+# (Erik's cmmg PTMP is /u/biterik/PTMP), NOT $HOME. Override with WORK=/some/path,
+# or WORK="$(pwd)" to build in the current dir.
 #
 #   ./build-lammps-cmmg-fork.sh
 # ===========================================================================
@@ -63,7 +65,12 @@ export I_MPI_CXX=g++             # make the impi C++ wrapper use g++, not icpx
 export I_MPI_CC=gcc
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_DIR="$(pwd)"
+# cmmg scratch (not $HOME). Erik's cmmg PTMP = /u/biterik/PTMP; generic form below.
+WORK="${WORK:-/u/$USER/PTMP/gracework}"
+mkdir -p "$WORK" || { echo "ERROR: cannot create WORK=$WORK — set WORK=/path you can write" >&2; exit 1; }
+RUN_DIR="$WORK"
+cd "$RUN_DIR"
+echo ">> work dir (build + clone land here): $RUN_DIR"
 
 LOG="${LOG:-$RUN_DIR/build-cmmg-fork-$(date +%Y%m%d-%H%M%S).log}"
 exec > >(tee -a "$LOG") 2>&1
