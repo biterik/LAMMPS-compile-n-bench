@@ -301,6 +301,23 @@ benchmark measures the ACE force evaluation, not MPI.
 - **Different cluster:** copy the closest build script, adjust the module loads
   and `Kokkos_ARCH_*`, and reuse `cmake/lammps-packages-mpcdf.cmake`.
 
+## GRACE builds & benchmark
+
+In addition to the PACE/ACE benchmark above, there is a parallel set of
+**GRACE** builds and a GRACE throughput benchmark, built from the **thermoatoms
+LAMMPS fork** (which also carries the efficient ACE MC/MD). These are kept
+separate on purpose — distinct `build-lammps-<machine>-fork.sh` scripts
+(binary `lmp_<machine>_fork`), a `bench/in.grace_bench` input on a smaller
+**common ~16k-atom** fcc-Cu cell (so a 2-layer model fits a 40 GB A100), the
+`bench/submit-<machine>-grace.slurm` jobs, and `bench/compare-grace.sh`. The
+recommended potential is the **SMAX-OMAT** foundation family
+(`GRACE-1L-SMAX-OMAT-large` + `GRACE-2L-SMAX-OMAT-medium`).
+
+Note the fork has **no `grace/fs/kk`**, so GPU GRACE goes through TensorFlow
+(CUDA on raven; ROCm on the MI300A is experimental). Full details, model
+download/export, and the per-machine matrix are in **[GRACE.md](GRACE.md)**;
+the fork base/rebase analysis is in **[FORK-ANALYSIS.md](FORK-ANALYSIS.md)**.
+
 ## License
 
 [MIT](LICENSE) © 2026 Erik Bitzek. LAMMPS itself is GPL-2.0 and is fetched from

@@ -51,6 +51,28 @@ above used `--gres=gpu:1` on a shared node; the submit scripts **now request
 `#SBATCH --exclusive`**, so re-running viper/raven will refresh those numbers
 contention-free (ACE is compute-bound, so expect only a small shift).
 
+## GRACE track (thermoatoms fork) — separate builds + benchmark
+
+Built from the **thermoatoms fork** (pinned `24da74cd…`, base `patch_11Feb2026`)
+which adds the GRACE pair styles + the fast ACE MC. Kept separate from the
+stable PACE builds: `build-lammps-<machine>-fork.sh` → `lmp_<machine>_fork`,
+`bench/in.grace_bench` (common ~16k fcc-Cu), `bench/submit-<machine>-grace.slurm`,
+`bench/compare-grace.sh`. Model: **SMAX-OMAT** (1L-large + 2L-medium). See
+**GRACE.md** for the full plan, model download/export, and TF setup.
+
+| Machine | Build script | GRACE on GPU | Status |
+|---|---|---|---|
+| cmmg | `build-lammps-cmmg-fork.sh` | n/a (CPU) | scripts ready — build + run |
+| viper-cpu | `build-lammps-viper-cpu-fork.sh` | n/a (CPU) | scripts ready — build + run |
+| raven | `build-lammps-raven-fork.sh` | TF-CUDA | scripts ready — build + run |
+| viper | `build-lammps-viper-fork.sh` | TF-ROCm (experimental) | scripts ready — needs tensorflow-rocm |
+
+**Key constraint:** the fork has **no `grace/fs/kk`** (no Kokkos FS), so GPU
+GRACE is TensorFlow-only. The cross-machine-comparable point is the **1-layer**
+model: `grace/fs` (CPU, no TF) vs TF `grace` (GPU). cmti and raven-cpu are
+**not** part of the GRACE track (per scope). Open: ask Sarath to add
+`grace/fs/kk` for a clean Kokkos GPU path on both vendors.
+
 ## Immediate next steps
 
 All three machines now build **and** have a benchmark result (table above). Builds

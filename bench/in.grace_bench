@@ -1,0 +1,67 @@
+# ===========================================================================
+# GRACE benchmark — fcc Cu, SAME system type as in.pace_bench, SMALLER common
+# size so that even the two-layer GRACE foundation model fits on a single
+# 40 GB A100. ONE input file drives every GRACE flavour via two variables:
+#
+#   pstyle = pair_style to use   (grace/fs | grace | grace/1layer/chunk |
+#                                 grace/2layer/chunk | grace/2layer/parallel)
+#   model  = path to the model   (FS_model.yaml  for grace/fs,
+#                                 saved_model dir for the TensorFlow styles)
+#
+# All GRACE pair styles require `units metal` (they do internally; we set it).
+# The pair_coeff line is identical for every style: "* * <model> Cu".
+#
+# Run examples (see bench/submit-*-grace.slurm):
+#   CPU, FS (no TF):     srun lmp -in in.grace_bench -var pstyle grace/fs \
+#                              -var model FS_model.yaml
+#   CPU, TF 2-layer:     srun lmp -in in.grace_bench -var pstyle grace/2layer/chunk \
+#                              -var model /path/to/2L_saved_model
+#   GPU (raven, TF-CUDA):     lmp -in in.grace_bench -var pstyle grace \
+#                              -var model /path/to/1L_saved_model
+#
+# ---------------------------------------------------------------------------
+# WHY A SMALLER, SEPARATE SIZE THAN in.pace_bench (256k atoms)?
+# Two-layer GRACE foundation models cost ~30-120 us/atom and a single 80 GB
+# A100 holds only ~20k-55k atoms for a 2L model; our Raven A100 is 40 GB, so
+# 256k atoms will NOT fit a 2L model. We therefore benchmark GRACE on a common
+# ~16k-atom fcc-Cu cell that fits every target (incl. 2L on a 40 GB A100 and
+# the MI300A), and report it as a SEPARATE table from the 256k PACE results.
+# Throughput (katom-step/s) is size-normalised, so the two tables are still
+# roughly comparable per-atom; absolute wall times are not. Keep nx/ny/nz and
+# nsteps identical across machines for a strictly fair GRACE-vs-GRACE compare.
+# ===========================================================================
+variable        nx     index 16            # 16^3 fcc cells -> 4*16^3 = 16,384 atoms
+variable        ny     index 16
+variable        nz     index 16
+variable        nsteps index 100           # GRACE is far costlier/step than PACE; keep small
+variable        pstyle index grace/fs      # override on the command line (-var pstyle ...)
+variable        model  index FS_model.yaml # override on the command line (-var model ...)
+
+units           metal
+atom_style      atomic
+atom_modify     map yes
+
+variable        a equal 3.597
+lattice         fcc ${a}
+region          box block 0 ${nx} 0 ${ny} 0 ${nz}
+create_box      1 box
+create_atoms    1 box
+mass            1 63.546                    # Cu
+
+# pair_style/pair_coeff are the same shape for every GRACE flavour:
+#   grace/fs                  -> model is FS_model.yaml      (no TensorFlow)
+#   grace, grace/*layer/*     -> model is a saved_model dir  (TensorFlow)
+pair_style      ${pstyle}
+pair_coeff      * * ${model} Cu
+
+velocity        all create 600.0 12345 loop geom
+neighbor        2.0 bin
+neigh_modify    every 20 delay 0 check no   # fixed, deterministic work for benchmarking
+
+fix             1 all nve
+timestep        0.001
+
+thermo          20
+thermo_style    custom step temp pe etotal press
+timer           full          # print the MPI task timing breakdown (Pair/Neigh/Comm %)
+run             ${nsteps}
