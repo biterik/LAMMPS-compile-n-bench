@@ -161,7 +161,10 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D Kokkos_ARCH_AMPERE80=on \
     -D FFT=KISS -D FFT_KOKKOS=CUFFT \
     "${GRACE_FLAGS[@]}" \
-    -D CMAKE_CXX_FLAGS="-diag-suppress 177,550,611,186,20011" \
+    `# NOTE: do NOT put -diag-suppress in CMAKE_CXX_FLAGS — nvcc_wrapper hands it` \
+    `# to g++ during CMake's host-only compiler probe and g++ reads the number` \
+    `# list as a stray input file ("cannot specify -o with -c ... multiple files").` \
+    `# The suppressed warnings are purely cosmetic (benign nvcc diagnostics).` \
     -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath=\$ORIGIN/../lib64 -Wl,-rpath=$KIM_PREFIX/lib64 -Wl,-rpath=$KIM_PREFIX/lib"
 
 cmake --build "$BUILD" -j "$JOBS"
