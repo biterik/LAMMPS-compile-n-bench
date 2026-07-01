@@ -39,19 +39,26 @@ grace_models download GRACE-2L-SMAX-OMAT-medium
 # default cache: $HOME/.cache/grace/<Full-Name>/   (override with $GRACE_CACHE)
 ```
 
-### Exporting the 1-layer model to FS (for grace/fs, no TensorFlow)
+### FS export does NOT work for these foundation models → use TensorFlow
+
+We tried exporting the 1-layer model to GRACE/FS (`grace_utils … export -sf`) to
+get a fast, TensorFlow-free CPU path. It **fails** for the SMAX-OMAT foundation
+models with `KeyError: 'RadialBasis'` — their radial basis is not the linear
+"FS" form the C++ exporter needs (FS export only works for models fitted with the
+FS architecture, not the full GRACE foundation models). **Confirmed on cmmg,
+2026-07-01.**
+
+So we run the 1-layer model through **TensorFlow** too, via `grace/1layer/chunk`,
+straight from the downloaded `saved_model` (no export step):
 
 ```bash
-grace_models checkpoint GRACE-1L-SMAX-OMAT-large      # downloads model.yaml + checkpoint
-CKPT=$GRACE_CACHE/checkpoints/GRACE-1L-SMAX-OMAT-large
-ls "$CKPT"                                             # confirm the model.yaml / checkpoint.index names
-# FS export is done with grace_utils (NOT gracemaker — gracemaker is for fitting
-# and requires an input.yaml). export sub-command + -sf writes the FS/C++ yaml:
-grace_utils -p "$CKPT/model.yaml" -c "$CKPT/checkpoint.index" export -n FS_model.yaml -sf
-#   -> writes FS_model.yaml   (copy it next to in.grace_bench)
-# (An .asi active set is only for extrapolation-grade monitoring and needs a
-#  training set — not required for the benchmark.)
+grace_models download GRACE-1L-SMAX-OMAT-large   # saved_model dir in $GRACE_CACHE
+grace_models download GRACE-2L-SMAX-OMAT-medium
+# then the submit scripts point pair_coeff at $GRACE_CACHE/<model> — nothing to export.
 ```
+
+Consequence: every GRACE run here needs a **TF-enabled** LAMMPS (`GRACE_TF=on`),
+and the CPU runs pay the CPU-TensorFlow performance tax (see §6).
 
 ---
 
@@ -159,13 +166,16 @@ submit scripts lower nsteps for 2L).
 
 ---
 
-## 6. Results (fcc-Cu, 16,384 atoms) — to fill in
+## 6. Results (fcc-Cu, 16,384 atoms)
+
+For reference, ACE/PACE on a full cmmg node (256k atoms) runs **393** katom-step/s;
+CPU-TensorFlow GRACE is ~40× (1L) to ~110× (2L) slower per atom — the CPU-TF tax.
 
 | Machine | Model | pair_style | TF? | atoms | nsteps | katom-step/s | Pair% | Notes |
 |---|---|---|:--:|--:|--:|--:|--:|---|
-| cmmg | 1L-SMAX-OMAT-L | grace/fs | no | 16384 | 100 | _pending_ | | full node, 256 ranks |
-| cmmg | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | _pending_ | | CPU TF (slow) |
-| viper-cpu | 1L-SMAX-OMAT-L | grace/fs | no | 16384 | 100 | _pending_ | | full node, 128 ranks |
+| cmmg | 1L-SMAX-OMAT-L | grace/1layer/chunk | yes | 16384 | 100 | **10.03** | 81.4% | full node, 256 ranks (2026-07-01) |
+| cmmg | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | **3.61** | 97.2% | full node, CPU TF (slow) |
+| viper-cpu | 1L-SMAX-OMAT-L | grace/1layer/chunk | yes | 16384 | 100 | _pending_ | | full node, 128 ranks |
 | viper-cpu | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | _pending_ | | CPU TF (slow) |
 | raven | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | _pending_ | | 1 A100, TF-CUDA |
 | raven | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | _pending_ | | 1 A100, TF-CUDA |
