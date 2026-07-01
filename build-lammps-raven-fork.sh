@@ -95,7 +95,10 @@ if [ ! -f "$VORO_LIB" ]; then
       if [ ! -d "$VORO_DIR" ]; then
           curl -fL -o "voro++-$VORO_VER.tar.gz" "https://download.lammps.org/thirdparty/voro++-$VORO_VER.tar.gz"
           tar xzf "voro++-$VORO_VER.tar.gz"
-          ( cd "$VORO_DIR" && patch -b -p0 < "$SRC/lib/voronoi/voro-make.patch" )
+          # patch moved cmake/patches/ (newer LAMMPS) <- lib/voronoi/ (older); try both.
+          VPATCH="$SRC/cmake/patches/voro-make.patch"
+          [ -f "$VPATCH" ] || VPATCH="$SRC/lib/voronoi/voro-make.patch"
+          ( cd "$VORO_DIR" && patch -b -p0 < "$VPATCH" )
       fi
       make -C "$VORO_DIR" CXX=g++ CFLAGS="-O3 -fPIC" )
 fi
