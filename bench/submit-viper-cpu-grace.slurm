@@ -24,7 +24,7 @@ SUB="${SLURM_SUBMIT_DIR:-$PWD}"
 LMP="${LMP:-$SUB/lammps-fork/build-viper-cpu-fork/lmp_viper_cpu_fork}"
 
 FS_MODEL="${FS_MODEL:-FS_model.yaml}"
-MODEL_2L="${MODEL_2L:-$HOME/.cache/grace/GRACE-2L-SMAX-OMAT-medium}"
+MODEL_2L="${MODEL_2L:-${GRACE_CACHE:-$HOME/.cache/grace}/GRACE-2L-SMAX-OMAT-medium}"
 
 # 1) Headline: FS 1-layer, full node, plain MPI, no TensorFlow.
 srun "$LMP" -in in.grace_bench -var pstyle grace/fs -var model "$FS_MODEL" \

@@ -43,6 +43,11 @@ FORK_COMMIT="${FORK_COMMIT:-24da74cd73323f5e7415fdd9a9670b88535464d3}"
 
 # GRACE / TensorFlow: on by default so the 2-layer TF model can run here.
 GRACE_TF="${GRACE_TF:-on}"
+# Python module kept loaded for TensorFlow discovery during configure (the venv
+# interpreter needs its base module). Use a Python 3.10-3.12 module, e.g.
+#   PYMODULE=python-waterboa/2024.06   (NOT the default anaconda/3/2020.02 = py3.7)
+# Only used when GRACE_TF != off. Leave empty for an FS/ACE-only build.
+PYMODULE="${PYMODULE:-}"
 
 if ! command -v module >/dev/null 2>&1; then
     for _f in /etc/profile.d/modules.sh \
@@ -58,6 +63,10 @@ module load impi/${IMPI_VER}
 module load cmake/${CMAKE_VER}
 module load mkl/${MKL_VER}       # BLAS/LAPACK for PLUMED (sets MKLROOT)
 module load gsl/${GSL_VER}       # GSL for PLUMED (sets GSL_HOME)
+# Keep a modern Python on PATH for TensorFlow discovery (module purge above wiped it).
+if [ "$GRACE_TF" != "off" ] && [ -n "${PYMODULE:-}" ]; then
+    module load "$PYMODULE" && echo ">> loaded Python module for TF discovery: $PYMODULE"
+fi
 
 set -euo pipefail
 
