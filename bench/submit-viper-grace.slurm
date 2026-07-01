@@ -32,8 +32,8 @@ export HSA_XNACK=1               # MI300A APU unified memory (as for the PACE ru
 SUB="${SLURM_SUBMIT_DIR:-$PWD}"
 LMP="${LMP:-$SUB/lammps-fork/build-viper-fork/lmp_viper_fork}"
 
-MODEL_1L="${MODEL_1L:-$HOME/.cache/grace/GRACE-1L-SMAX-OMAT-large}"
-MODEL_2L="${MODEL_2L:-$HOME/.cache/grace/GRACE-2L-SMAX-OMAT-medium}"
+MODEL_1L="${MODEL_1L:-${GRACE_CACHE:-$HOME/.cache/grace}/GRACE-1L-SMAX-OMAT-large}"
+MODEL_2L="${MODEL_2L:-${GRACE_CACHE:-$HOME/.cache/grace}/GRACE-2L-SMAX-OMAT-medium}"
 
 if [ -d "$MODEL_1L" ]; then
     srun "$LMP" -in in.grace_bench -var pstyle grace -var model "$MODEL_1L" \

@@ -42,11 +42,15 @@ grace_models download GRACE-2L-SMAX-OMAT-medium
 ### Exporting the 1-layer model to FS (for grace/fs, no TensorFlow)
 
 ```bash
-grace_models checkpoint GRACE-1L-SMAX-OMAT-large      # need the checkpoint, not just saved_model
-gracemaker -r -s -sf -p ~/.cache/grace/checkpoints/GRACE-1L-SMAX-OMAT-large/model.yaml
-#   -> writes FS_model.yaml   (copy it next to in.grace_bench as FS_model.yaml)
-# optional, for extrapolation-grade monitoring:
-#   pace_activeset -d training_set.pkl.gz FS_model.yaml   -> FS_model.asi
+grace_models checkpoint GRACE-1L-SMAX-OMAT-large      # downloads model.yaml + checkpoint
+CKPT=$GRACE_CACHE/checkpoints/GRACE-1L-SMAX-OMAT-large
+ls "$CKPT"                                             # confirm the model.yaml / checkpoint.index names
+# FS export is done with grace_utils (NOT gracemaker — gracemaker is for fitting
+# and requires an input.yaml). export sub-command + -sf writes the FS/C++ yaml:
+grace_utils -p "$CKPT/model.yaml" -c "$CKPT/checkpoint.index" export -n FS_model.yaml -sf
+#   -> writes FS_model.yaml   (copy it next to in.grace_bench)
+# (An .asi active set is only for extrapolation-grade monitoring and needs a
+#  training set — not required for the benchmark.)
 ```
 
 ---
@@ -93,7 +97,20 @@ model is the accuracy tier (CPU + raven-GPU; viper-GPU only if TF-ROCm works).
 
 The fork's `cmake/Modules/Packages/ML-PACE.cmake` finds TensorFlow by importing
 it from a Python env. Provide the right wheel and pass `PYTHON=` to the build
-(and `TF_PYLIB=` to the submit script for the runtime libs):
+(and `TF_PYLIB=` to the submit script for the runtime libs).
+
+> **Put the venv, pip cache, and model cache in PTMP — never `$HOME`.** The TF
+> stack pulls multi-GB `nvidia-cu12` wheels and the GRACE models are large; the
+> cluster `$HOME` quota is small and *will* overflow. Before installing:
+> ```bash
+> export PTMP=/u/$USER/PTMP                 # cmmg: /u/biterik/PTMP
+> export PIP_CACHE_DIR=$PTMP/.pipcache TMPDIR=$PTMP/.tmp
+> export GRACE_CACHE=$PTMP/gracework/grace-cache   # grace_models downloads here
+> mkdir -p "$PIP_CACHE_DIR" "$TMPDIR" "$GRACE_CACHE"
+> python -m venv $PTMP/gracework/tf-cpu     # venv in PTMP, not ~/tf-cpu
+> ```
+> The `~/tf-*` paths in the table below are shorthand — use the PTMP venv path.
+> The submit scripts read `$GRACE_CACHE` for the model dirs (default `$HOME/.cache/grace`).
 
 | Machine | TensorFlow wheel | Build | Run |
 |---|---|---|---|

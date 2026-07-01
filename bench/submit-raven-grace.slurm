@@ -32,8 +32,8 @@ export OMP_NUM_THREADS=1
 SUB="${SLURM_SUBMIT_DIR:-$PWD}"
 LMP="${LMP:-$SUB/lammps-fork/build-raven-fork/lmp_raven_fork}"
 
-MODEL_1L="${MODEL_1L:-$HOME/.cache/grace/GRACE-1L-SMAX-OMAT-large}"
-MODEL_2L="${MODEL_2L:-$HOME/.cache/grace/GRACE-2L-SMAX-OMAT-medium}"
+MODEL_1L="${MODEL_1L:-${GRACE_CACHE:-$HOME/.cache/grace}/GRACE-1L-SMAX-OMAT-large}"
+MODEL_2L="${MODEL_2L:-${GRACE_CACHE:-$HOME/.cache/grace}/GRACE-2L-SMAX-OMAT-medium}"
 
 # 1) 1-layer model on the GPU (TensorFlow-CUDA).
 if [ -d "$MODEL_1L" ]; then

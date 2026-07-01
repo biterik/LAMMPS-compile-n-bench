@@ -27,8 +27,9 @@ LMP="${LMP:-$SUB/lammps-fork/build-cmmg-fork/lmp_cmmg_fork}"
 # --- model files (override with env vars) -----------------------------------
 # 1-layer FS export (see GRACE.md: gracemaker -r -s -sf -> FS_model.yaml):
 FS_MODEL="${FS_MODEL:-FS_model.yaml}"
-# 2-layer TensorFlow saved_model dir (grace_models download GRACE-2L-SMAX-OMAT-medium):
-MODEL_2L="${MODEL_2L:-$HOME/.cache/grace/GRACE-2L-SMAX-OMAT-medium}"
+# 2-layer TensorFlow saved_model dir (grace_models download GRACE-2L-SMAX-OMAT-medium).
+# Models are multi-GB — keep them in PTMP via GRACE_CACHE, NOT $HOME:
+MODEL_2L="${MODEL_2L:-${GRACE_CACHE:-$HOME/.cache/grace}/GRACE-2L-SMAX-OMAT-medium}"
 
 # 1) Headline: FS 1-layer, full node, plain MPI, no TensorFlow.
 srun "$LMP" -in in.grace_bench -var pstyle grace/fs -var model "$FS_MODEL" \
