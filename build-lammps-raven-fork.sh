@@ -28,6 +28,10 @@ FORK_URL="${FORK_URL:-https://github.com/thermoatoms/lammps.git}"
 FORK_BRANCH="${FORK_BRANCH:-develop}"
 FORK_COMMIT="${FORK_COMMIT:-24da74cd73323f5e7415fdd9a9670b88535464d3}"
 GRACE_TF="${GRACE_TF:-on}"
+# Python module kept loaded for TensorFlow discovery during configure (the venv
+# interpreter needs its base module). Use a Python 3.10-3.12 module, e.g.
+#   PYMODULE=anaconda/3/2023.03   (or python-waterboa/2024.06). Only used if GRACE_TF!=off.
+PYMODULE="${PYMODULE:-}"
 
 if ! command -v module >/dev/null 2>&1; then
     for _f in /etc/profile.d/modules.sh \
@@ -40,6 +44,10 @@ fi
 module purge
 module load gcc/13 cuda/12.6 openmpi_gpu/5.0 cmake
 module load mkl/2025.2            # external LAPACK (internal f2c linalg won't compile under nvcc)
+# Keep a modern Python on PATH for TensorFlow discovery (module purge wiped it).
+if [ "$GRACE_TF" != "off" ] && [ -n "${PYMODULE:-}" ]; then
+    module load "$PYMODULE" && echo ">> loaded Python module for TF discovery: $PYMODULE"
+fi
 
 set -euo pipefail
 
