@@ -42,7 +42,9 @@ if ! command -v module >/dev/null 2>&1; then
 fi
 
 module purge
-module load gcc/13 cuda/12.6 openmpi_gpu/5.0 cmake
+# Pin CMake 3.30: CMake 4.2's compiler probe feeds nvcc_wrapper a stray arg
+# ("cannot specify -o with -c ... multiple files"). 3.x is the known-good line.
+module load gcc/13 cuda/12.6 openmpi_gpu/5.0 cmake/3.30
 module load mkl/2025.2            # external LAPACK (internal f2c linalg won't compile under nvcc)
 # Keep a modern Python on PATH for TensorFlow discovery (module purge wiped it).
 if [ "$GRACE_TF" != "off" ] && [ -n "${PYMODULE:-}" ]; then
