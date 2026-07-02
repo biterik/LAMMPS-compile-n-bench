@@ -91,19 +91,26 @@ if [ ! -f "$VORO_LIB" ]; then
 fi
 [ -f "$VORO_LIB" ] || { echo "ERROR: voro++ build failed" >&2; exit 1; }
 
-# --- hipcc wrapper: force C++17 + gfx942 on every hipcc invocation -----------
+# --- hipcc wrapper: drop CMake's c++98 probe std + pin gfx942 ----------------
+# Only fall back to c++17 when NO real -std remains. The old version appended
+# -std=c++17 unconditionally, which clobbered the -std=c++20 that the fork's
+# newer Kokkos uses in its C++20 feature probe (cplusplus20.cpp) -> compile
+# errors. Now we keep any explicit -std (c++17/c++20/gnu++NN) and only add
+# c++17 for the bare project() probe (where CMake injected -std=c++98).
 REAL_HIPCC="$(command -v hipcc)"
 HIPCC_WRAP="$RUN_DIR/hipcc-cxx17"
 cat > "$HIPCC_WRAP" <<EOF
 #!/bin/bash
-args=()
+args=(); has_std=0
 for a in "\$@"; do
   case "\$a" in
-    -std=c++98|-std=gnu++98|-std=c++03|-std=gnu++03) ;;
+    -std=c++98|-std=gnu++98|-std=c++03|-std=gnu++03) ;;   # drop CMake's probe std
+    -std=*) has_std=1; args+=("\$a") ;;                    # keep real std (c++17/c++20/...)
     *) args+=("\$a") ;;
   esac
 done
-exec "$REAL_HIPCC" --offload-arch=gfx942 "\${args[@]}" -std=c++17
+[ "\$has_std" -eq 0 ] && args+=(-std=c++17)
+exec "$REAL_HIPCC" --offload-arch=gfx942 "\${args[@]}"
 EOF
 chmod +x "$HIPCC_WRAP"
 echo ">> hipcc wrapper: $HIPCC_WRAP  (real: $REAL_HIPCC)"
