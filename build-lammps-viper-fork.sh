@@ -28,6 +28,10 @@ FORK_BRANCH="${FORK_BRANCH:-develop}"
 FORK_COMMIT="${FORK_COMMIT:-24da74cd73323f5e7415fdd9a9670b88535464d3}"
 # Default OFF here: TF-ROCm must be set up deliberately. Set GRACE_TF=on + PYTHON=.
 GRACE_TF="${GRACE_TF:-off}"
+# Python module kept loaded for TensorFlow discovery during configure (the venv
+# interpreter needs its base module). Use a Python 3.10-3.12 module, e.g.
+#   PYMODULE=python-waterboa/2024.06. Only used when GRACE_TF=on.
+PYMODULE="${PYMODULE:-}"
 
 if ! command -v module >/dev/null 2>&1; then
     for _f in /etc/profile.d/modules.sh \
@@ -39,6 +43,10 @@ fi
 
 module purge
 module load gcc/14 rocm/6.3 openmpi_gpu/5.0 cmake
+# Keep a modern Python on PATH for TensorFlow(-ROCm) discovery (module purge wiped it).
+if [ "$GRACE_TF" != "off" ] && [ -n "${PYMODULE:-}" ]; then
+    module load "$PYMODULE" && echo ">> loaded Python module for TF discovery: $PYMODULE"
+fi
 
 set -euo pipefail
 
