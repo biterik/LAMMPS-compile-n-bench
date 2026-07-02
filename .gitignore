@@ -1,22 +1,49 @@
+# ===========================================================================
+# This repo holds ONLY the reproducible bits: build scripts, cmake preset,
+# benchmark inputs/submit scripts, docs. Everything a build or run generates
+# (LAMMPS/fork clones, build trees, venvs, model caches, logs) is regenerable
+# and stays OUT of git — keep it in PTMP on the clusters, never committed.
+# ===========================================================================
+
 # macOS
 .DS_Store
 
-# LAMMPS source clone + build trees (the scripts clone/build into ./lammps)
+# LAMMPS source clones + build trees (scripts clone/build into ./lammps or ./lammps-fork)
 lammps/
+lammps-fork/
 build-*/
 build-*.log
 
-# Benchmark runtime artifacts
+# External libs the GPU scripts stage, and the generated hipcc wrapper
+voro++-*/
+kim-api-*/
+*.tar.gz
+*.txz
+hipcc-cxx17
+
+# Python / TensorFlow venvs + caches + GRACE model cache (belong in PTMP, not git)
+tf-cpu/
+tf-gpu/
+tf-rocm/
+tf-*/
+grace-cache/
+.pipcache/
+.tmp/
+
+# Benchmark runtime artifacts: logs, dumps, restarts, exported models
+log.*
 *.restart
 *.dump
 dump.*
 slurm-*.out
+*.slurmout
+FS_model.*
+_local_logs/
 
 # Potentials are NOT redistributed here — copy from LAMMPS potentials/ at run time
-bench/*.ace
+*.ace
 
 # Editor / temp
 *~
 *.swp
 *.bak
-log.pace_cmti
