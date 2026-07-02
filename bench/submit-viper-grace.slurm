@@ -23,6 +23,8 @@ fi
 module purge
 module load gcc/14 rocm/6.3 openmpi_gpu/5.0
 export OMP_NUM_THREADS=1
+# Quiet TensorFlow's per-rank C++ log flood (3 = hide INFO+WARNING+ERROR).
+export TF_CPP_MIN_LOG_LEVEL=3
 export HSA_XNACK=1               # MI300A APU unified memory (as for the PACE run)
 
 # tensorflow-rocm runtime must be findable at run time (same env used to build):
