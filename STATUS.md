@@ -62,16 +62,30 @@ stable PACE builds: `build-lammps-<machine>-fork.sh` → `lmp_<machine>_fork`,
 
 | Machine | Build script | GRACE on GPU | Status |
 |---|---|---|---|
-| cmmg | `build-lammps-cmmg-fork.sh` | n/a (CPU) | scripts ready — build + run |
+| **cmmg** | `build-lammps-cmmg-fork.sh` | n/a (CPU) | ✅ **built + benchmarked** (1L 10.03, 2L 3.61 katom-step/s) |
+| **raven** | `build-lammps-raven-fork.sh` | TF-CUDA | ✅ **built + benchmarked** (1L 57.53, 2L 12.82; GPU confirmed) |
 | viper-cpu | `build-lammps-viper-cpu-fork.sh` | n/a (CPU) | scripts ready — build + run |
-| raven | `build-lammps-raven-fork.sh` | TF-CUDA | scripts ready — build + run |
 | viper | `build-lammps-viper-fork.sh` | TF-ROCm (experimental) | scripts ready — needs tensorflow-rocm |
 
+**Key result:** one A100 (TF-CUDA) is **5.7× (1L) / 3.5× (2L)** faster than the
+full 256-core cmmg node; 2L GPU = 64.5 µs/atom (published A100 range). GRACE
+belongs on the GPU. Full table in **GRACE.md §6**.
+
 **Key constraint:** the fork has **no `grace/fs/kk`** (no Kokkos FS), so GPU
-GRACE is TensorFlow-only. The cross-machine-comparable point is the **1-layer**
-model: `grace/fs` (CPU, no TF) vs TF `grace` (GPU). cmti and raven-cpu are
-**not** part of the GRACE track (per scope). Open: ask Sarath to add
+GRACE is TensorFlow-only, and CPU runs pay a big CPU-TF tax. cmti and raven-cpu
+are **not** part of the GRACE track (per scope). Open: ask Sarath to add
 `grace/fs/kk` for a clean Kokkos GPU path on both vendors.
+
+**Build gotchas learned (fork on newer LAMMPS, all fixed in the scripts):**
+1. **FS export fails** for SMAX-OMAT foundation models (`KeyError: RadialBasis`)
+   → run 1L via TF `grace/1layer/chunk`, not `grace/fs`.
+2. **voro-make.patch moved** `lib/voronoi/` → `cmake/patches/` in newer LAMMPS;
+   GPU pre-build scripts now try both paths.
+3. **`-diag-suppress` in `CMAKE_CXX_FLAGS` breaks the nvcc_wrapper host probe**
+   ("cannot specify -o with -c … multiple files") → removed it (cosmetic only).
+4. **PYMODULE hook** keeps a Python 3.10–3.12 module loaded through the build's
+   `module purge` so TF discovery works; **all caches/venvs go to PTMP, not $HOME**
+   ($HOME quota is tiny). raven work dir = `/ptmp/biterik` (not `$PTMP`, which is cmmc).
 
 ## Immediate next steps
 
