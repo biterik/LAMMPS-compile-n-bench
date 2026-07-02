@@ -170,15 +170,18 @@ submit scripts lower nsteps for 2L).
 
 For reference, ACE/PACE on a full cmmg node (256k atoms) runs **393** katom-step/s;
 CPU-TensorFlow GRACE is ~40× (1L) to ~110× (2L) slower per atom — the CPU-TF tax.
+**One A100 (TF-CUDA) is 5.7× (1L) and 3.5× (2L) faster than the full 256-core
+cmmg node** — GRACE belongs on the GPU. The 2L GPU run measured 64.5 µs/atom,
+right in the published A100 range (~27–120 µs/atom), vs 64,514 µs/atom on cmmg CPU.
 
 | Machine | Model | pair_style | TF? | atoms | nsteps | katom-step/s | Pair% | Notes |
 |---|---|---|:--:|--:|--:|--:|--:|---|
 | cmmg | 1L-SMAX-OMAT-L | grace/1layer/chunk | yes | 16384 | 100 | **10.03** | 81.4% | full node, 256 ranks (2026-07-01) |
 | cmmg | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | **3.61** | 97.2% | full node, CPU TF (slow) |
+| **raven** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **57.53** | 98.1% | 1 A100, TF-CUDA (2026-07-01) |
+| **raven** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | **12.82** | 99.7% | 1 A100, TF-CUDA (2026-07-01) |
 | viper-cpu | 1L-SMAX-OMAT-L | grace/1layer/chunk | yes | 16384 | 100 | _pending_ | | full node, 128 ranks |
 | viper-cpu | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | _pending_ | | CPU TF (slow) |
-| raven | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | _pending_ | | 1 A100, TF-CUDA |
-| raven | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | _pending_ | | 1 A100, TF-CUDA |
 | viper | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | _pending_ | | 1 MI300A, TF-ROCm (experimental) |
 | viper | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | _pending_ | | 1 MI300A, TF-ROCm (experimental) |
 
