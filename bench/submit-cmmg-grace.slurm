@@ -21,6 +21,9 @@ fi
 module purge
 module load gcc/13 impi/2021.16
 export OMP_NUM_THREADS=1
+# Quiet TensorFlow's per-rank C++ log flood (oneDNN/cuFFT/cuDNN/placer/cuInit ...).
+# 3 = hide INFO+WARNING+ERROR. Without this every MPI rank prints the same banner.
+export TF_CPP_MIN_LOG_LEVEL=3
 
 SUB="${SLURM_SUBMIT_DIR:-$PWD}"
 LMP="${LMP:-$SUB/lammps-fork/build-cmmg-fork/lmp_cmmg_fork}"

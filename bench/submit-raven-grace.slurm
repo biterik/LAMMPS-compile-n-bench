@@ -23,6 +23,8 @@ fi
 module purge
 module load gcc/13 cuda/12.6 openmpi_gpu/5.0
 export OMP_NUM_THREADS=1
+# Quiet TensorFlow's per-rank C++ log flood (3 = hide INFO+WARNING+ERROR).
+export TF_CPP_MIN_LOG_LEVEL=3
 
 # TensorFlow runtime must be findable at run time. Point this at the lib dir of
 # the SAME python env whose TF the binary was built against (the CUDA wheel):

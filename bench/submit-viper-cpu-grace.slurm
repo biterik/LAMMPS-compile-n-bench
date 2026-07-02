@@ -20,6 +20,8 @@ fi
 module purge
 module load gcc/14 openmpi/5.0
 export OMP_NUM_THREADS=1
+# Quiet TensorFlow's per-rank C++ log flood (3 = hide INFO+WARNING+ERROR).
+export TF_CPP_MIN_LOG_LEVEL=3
 
 SUB="${SLURM_SUBMIT_DIR:-$PWD}"
 LMP="${LMP:-$SUB/lammps-fork/build-viper-cpu-fork/lmp_viper_cpu_fork}"
