@@ -181,8 +181,12 @@ MPIE install years approximate, inferred from the CPU generation):
 For reference, ACE/PACE on a full cmmg node (256k atoms) runs **393** katom-step/s;
 CPU-TensorFlow GRACE is ~40× (1L) to ~110× (2L) slower per atom — the CPU-TF tax.
 **One A100 (TF-CUDA) is 5.7× (1L) and 3.5× (2L) faster than the full 256-core
-cmmg node** — GRACE belongs on the GPU. The 2L GPU run measured 64.5 µs/atom,
+cmmg node** — GRACE belongs on the GPU. The 2L A100 run measured 64.5 µs/atom,
 right in the published A100 range (~27–120 µs/atom), vs 64,514 µs/atom on cmmg CPU.
+The **MI300A APU** runs GRACE via TF-ROCm (gfx942, confirmed on-GPU) but is
+**~13–14× slower than the A100** (1L 231 µs/atom vs 17): TF-ROCm's kernels for
+these graph-ACE ops are far less optimized than TF-CUDA. So on this benchmark the
+A100 beats the newer MI300A purely on software maturity, not silicon.
 
 | Machine | Model | pair_style | TF? | atoms | nsteps | katom-step/s | Pair% | Notes |
 |---|---|---|:--:|--:|--:|--:|--:|---|
@@ -192,15 +196,19 @@ right in the published A100 range (~27–120 µs/atom), vs 64,514 µs/atom on cm
 | **raven** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | **12.82** | 99.7% | 1 A100, TF-CUDA (2026-07-01) |
 | viper-cpu | 1L-SMAX-OMAT-L | grace/1layer/chunk | yes | 16384 | 100 | _pending_ | | full node, 128 ranks |
 | viper-cpu | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | _pending_ | | CPU TF (slow) |
-| viper | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | _pending_ | | 1 MI300A, TF-ROCm (experimental) |
-| viper | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | _pending_ | | 1 MI300A, TF-ROCm (experimental) |
+| **viper** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **4.33** | 99.9% | 1 MI300A, TF-ROCm — GPU confirmed, ~13× slower than A100 (2026-07-06) |
+| **viper** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | **0.94** | 100% | 1 MI300A, TF-ROCm |
 
 ---
 
 ## 7. Caveats
 
-- **viper-GPU GRACE is experimental** (TF-ROCm for gfx942). If it doesn't run,
-  report the CPU GRACE numbers (cmmg / viper-cpu) and note the APU as N/A.
+- **viper-GPU GRACE works but is slow.** TF-ROCm 2.17 (from AMD's ROCm-6.3 repo,
+  not PyPI) runs GRACE on the MI300A (gfx942, confirmed on-GPU), but ~13× slower
+  than the A100 — a TF-ROCm software-maturity gap, not a hardware one. Submit
+  with `sbatch --export=NONE` (a leaked interactive module env makes the job's
+  `module load rocm` fail and TF silently drops to CPU). `grace/fs/kk` (ask
+  Sarath) would give a native Kokkos path and likely close much of the gap.
 - **CPU TensorFlow is slow** (the GRACE docs say so); the 2L CPU rows are a
   data point, not a showcase — keep their nsteps small.
 - **FS vs TF for the 1L model** are the *same model*, different evaluators; the
