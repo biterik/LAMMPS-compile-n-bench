@@ -248,6 +248,22 @@ which prints a throughput table including the `Pair%` / `Comm%` breakdown from
 
 ---
 
+## Clusters at a glance
+
+Hardware of the benchmarked machines, so the throughput numbers below need no
+external lookup. "Nodes" is the size of the partition used; each benchmark uses
+one full node (CPU) or one device (GPU). MPIE install years are approximate
+(inferred from the CPU generation).
+
+| Machine (partition) | Site · vendor · installed | Nodes | Per compute node | Accelerator · memory | Docs |
+|---|---|---|---|---|---|
+| **cmmg** (`p.cmmg`) | MPIE Sustainable-Materials · ~2023 | 96 | 2× AMD EPYC 9754 "Bergamo" — 256 cores (Zen4c), 768 GB | — (CPU only) | [cluster](https://docs.mpcdf.mpg.de/doc/computing/clusters/systems/Sustainable_Materials.html) · [MPIE HW](https://www.mpie.de/4065158/Hardware) |
+| **cmti** (`p.cmfe`) | MPIE Sustainable-Materials · ~2019 | 358 | 2× Intel Xeon Gold 6230 "Cascade Lake" — 40 cores, 192 GB | — (CPU only) | [cluster](https://docs.mpcdf.mpg.de/doc/computing/clusters/systems/Sustainable_Materials.html) |
+| **viper-cpu** | MPCDF · Atos/Eviden · Jun 2024 | 768 | 2× AMD EPYC 9554 "Genoa" — 128 cores, ≥512 GB | — (CPU only) | [system](https://www.mpcdf.mpg.de/services/supercomputing/viper) · [guide](https://docs.mpcdf.mpg.de/doc/computing/viper-user-guide.html) |
+| **viper** (GPU) | MPCDF · Atos/Eviden · Feb 2025 | 300 GPU | 2× AMD MI300A APU (24 CPU cores each) | 2× MI300A · **128 GB HBM3** each (unified CPU+GPU) | [system](https://www.mpcdf.mpg.de/services/supercomputing/viper) · [GPU guide](https://docs.mpcdf.mpg.de/doc/computing/viper-gpu-user-guide.html) |
+| **raven-cpu** | MPCDF · Lenovo · 2020/21 | 1592 CPU | 2× Intel Xeon IceLake-SP 8360Y — 72 cores, 256 GB | — (CPU only) | [system](https://www.mpcdf.mpg.de/services/supercomputing/raven) · [guide](https://docs.mpcdf.mpg.de/doc/computing/raven-user-guide.html) |
+| **raven** (GPU) | MPCDF · Lenovo · 2020/21 | 192 GPU | 2× Intel Xeon IceLake-SP 8360Y — 72 cores, 512 GB | 4× NVIDIA A100-SXM4 · **40 GB HBM2** each (NVLink) | [system](https://www.mpcdf.mpg.de/services/supercomputing/raven) · [details](https://docs.mpcdf.mpg.de/doc/computing/raven-details.html) |
+
 ## Results so far
 
 PACE, fcc-Cu, **256,000 atoms, 500 steps**, `timer full`. The **full-node cmmg run

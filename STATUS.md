@@ -24,6 +24,9 @@ build scripts from a `/ptmp/$USER` work dir — they clone + build into `$PWD/la
 
 ## Benchmark results (PACE, fcc-Cu, 256k atoms, 500 steps, `timer full`)
 
+> Cluster hardware (year, nodes, CPU/GPU per node, GPU RAM, doc links): see the
+> **"Clusters at a glance"** table in `README.md`.
+
 Reference = **full-node cmmg** (256 cores). Only full-node CPU + single-device GPU
 runs are reported; the old half-node (128-core) cmmg run is excluded (contended).
 
