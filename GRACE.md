@@ -168,6 +168,16 @@ submit scripts lower nsteps for 2L).
 
 ## 6. Results (fcc-Cu, 16,384 atoms)
 
+Hardware of the benchmarked machines (one full node for CPU, one device for GPU;
+MPIE install years approximate, inferred from the CPU generation):
+
+| Machine | Site · vendor · installed | Nodes | Per compute node | Accelerator · memory | Docs |
+|---|---|---|---|---|---|
+| **cmmg** | MPIE Sustainable-Materials · ~2023 | 96 | 2× AMD EPYC 9754 "Bergamo" — 256 cores (Zen4c), 768 GB | — (CPU) | [cluster](https://docs.mpcdf.mpg.de/doc/computing/clusters/systems/Sustainable_Materials.html) |
+| **viper-cpu** | MPCDF · Atos/Eviden · Jun 2024 | 768 | 2× AMD EPYC 9554 "Genoa" — 128 cores, ≥512 GB | — (CPU) | [guide](https://docs.mpcdf.mpg.de/doc/computing/viper-user-guide.html) |
+| **viper** (GPU) | MPCDF · Atos/Eviden · Feb 2025 | 300 GPU | 2× AMD MI300A APU (24 CPU cores each) | 2× MI300A · **128 GB HBM3** each (unified) | [GPU guide](https://docs.mpcdf.mpg.de/doc/computing/viper-gpu-user-guide.html) |
+| **raven** (GPU) | MPCDF · Lenovo · 2020/21 | 192 GPU | 2× Intel Xeon IceLake-SP 8360Y — 72 cores, 512 GB | 4× NVIDIA A100-SXM4 · **40 GB HBM2** each (NVLink) | [details](https://docs.mpcdf.mpg.de/doc/computing/raven-details.html) |
+
 For reference, ACE/PACE on a full cmmg node (256k atoms) runs **393** katom-step/s;
 CPU-TensorFlow GRACE is ~40× (1L) to ~110× (2L) slower per atom — the CPU-TF tax.
 **One A100 (TF-CUDA) is 5.7× (1L) and 3.5× (2L) faster than the full 256-core
