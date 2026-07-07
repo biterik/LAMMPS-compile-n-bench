@@ -52,17 +52,19 @@ module load gcc/14
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 export TF_CPP_MIN_LOG_LEVEL="${TF_CPP_MIN_LOG_LEVEL:-1}"
 
-# ---- library path: gcc libstdc++ (CXXABI) : driver : CUDA wheels ----------
+# ---- library path: gcc libstdc++ (CXXABI) : driver : CUDA wheels : venv TF -
 GCC_LIB="$(dirname "$(g++ -print-file-name=libstdc++.so.6 2>/dev/null)")"
 NVLIBS="$(ls -d "$SUB"/tf-cuda/lib/python*/site-packages/nvidia/*/lib 2>/dev/null | paste -sd: -)"
+# The binary is now built against the venv's full libtensorflow_cc.so.2 (strategy
+# #2), which lives in site-packages/tensorflow -- so that dir MUST be on the path.
+# This is the ONLY TF copy (the downloaded C-API tarball is gone), so no registry
+# split. The C-API tarball lacked the XLA GPU platform -> "could not find
+# registered platform"; the cc.so.2 (same one raven uses) registers it.
+TF_PYLIB="$(ls -d "$SUB"/tf-cuda/lib/python*/site-packages/tensorflow 2>/dev/null | head -1)"
 # RUNPATH beats LD_LIBRARY_PATH, so PRELOAD gcc/14's libstdc++ to get CXXABI_1.3.15.
 export LD_PRELOAD="$GCC_LIB/libstdc++.so.6"
 # /usr/lib64 supplies the driver libcuda.so.1 (NOT shipped by the nvidia wheels).
-# DO NOT add the venv's site-packages/tensorflow here: the binary already links
-# its own bundled libtensorflow.so.2 (in build-dais-fork/lib, via RPATH). Adding
-# the venv TF loads a SECOND libtensorflow_framework.so.2, which splits the XLA
-# GPU platform registry -> "could not find registered platform with id 0x...".
-export LD_LIBRARY_PATH="$GCC_LIB:/usr/lib64:${NVLIBS}:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$GCC_LIB:/usr/lib64:${NVLIBS}:${TF_PYLIB}:${LD_LIBRARY_PATH:-}"
 
 # ---- PRE-FLIGHT: verify everything, abort loudly before wasting the run ---
 echo "=========================================================="
