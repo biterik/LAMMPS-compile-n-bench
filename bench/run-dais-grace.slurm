@@ -52,14 +52,17 @@ module load gcc/14
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 export TF_CPP_MIN_LOG_LEVEL="${TF_CPP_MIN_LOG_LEVEL:-1}"
 
-# ---- library path: gcc libstdc++ (CXXABI) : driver : CUDA wheels : TF ----
+# ---- library path: gcc libstdc++ (CXXABI) : driver : CUDA wheels ----------
 GCC_LIB="$(dirname "$(g++ -print-file-name=libstdc++.so.6 2>/dev/null)")"
 NVLIBS="$(ls -d "$SUB"/tf-cuda/lib/python*/site-packages/nvidia/*/lib 2>/dev/null | paste -sd: -)"
-TF_PYLIB="$(ls -d "$SUB"/tf-cuda/lib/python*/site-packages/tensorflow 2>/dev/null | head -1)"
 # RUNPATH beats LD_LIBRARY_PATH, so PRELOAD gcc/14's libstdc++ to get CXXABI_1.3.15.
 export LD_PRELOAD="$GCC_LIB/libstdc++.so.6"
 # /usr/lib64 supplies the driver libcuda.so.1 (NOT shipped by the nvidia wheels).
-export LD_LIBRARY_PATH="$GCC_LIB:/usr/lib64:${NVLIBS}:${TF_PYLIB}:${LD_LIBRARY_PATH:-}"
+# DO NOT add the venv's site-packages/tensorflow here: the binary already links
+# its own bundled libtensorflow.so.2 (in build-dais-fork/lib, via RPATH). Adding
+# the venv TF loads a SECOND libtensorflow_framework.so.2, which splits the XLA
+# GPU platform registry -> "could not find registered platform with id 0x...".
+export LD_LIBRARY_PATH="$GCC_LIB:/usr/lib64:${NVLIBS}:${LD_LIBRARY_PATH:-}"
 
 # ---- PRE-FLIGHT: verify everything, abort loudly before wasting the run ---
 echo "=========================================================="
@@ -74,6 +77,8 @@ check "model 2L"  "$MODEL_2L"
 if [ -n "$NVLIBS" ]; then echo "  OK       nvidia libs: $NVLIBS"; else echo "  MISSING  nvidia CUDA wheel libs"; fail=1; fi
 if [ -e /usr/lib64/libcuda.so.1 ]; then echo "  OK       driver: /usr/lib64/libcuda.so.1"; else echo "  MISSING  /usr/lib64/libcuda.so.1"; fail=1; fi
 echo "  --- nvidia-smi ---"; nvidia-smi -L || fail=1
+echo "  --- TF the binary resolves (expect ONE, from build-dais-fork/lib) ---"
+ldd "$LMP" 2>/dev/null | grep -i tensorflow || echo "  (no libtensorflow in ldd?)"
 if [ "$fail" -ne 0 ]; then
     echo ">> PRE-FLIGHT FAILED — aborting before the 30 min allocation is wasted."
     exit 1
