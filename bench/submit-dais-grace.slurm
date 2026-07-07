@@ -15,6 +15,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
+#SBATCH --mem=120000            # DAIS gpu1 is shared -> a memory limit is required (<=375000 MB/GPU)
 #SBATCH --time=00:30:00
 #SBATCH --output=grace_dais.%j.out
 
@@ -38,7 +39,11 @@ GRACE_CACHE="${GRACE_CACHE:-/viper/ptmp2/$USER/gracework/grace-cache}"
 # TF-CUDA runtime: libtensorflow_cc.so.2 + the bundled nvidia-cu12 CUDA/cuDNN libs.
 TF_PYLIB="${TF_PYLIB:-$(ls -d "$SUB"/tf-cuda/lib/python*/site-packages/tensorflow 2>/dev/null | head -1)}"
 NVLIBS="$(ls -d "$SUB"/tf-cuda/lib/python*/site-packages/nvidia/*/lib 2>/dev/null | paste -sd: -)"
-export LD_LIBRARY_PATH="${TF_PYLIB:-}:${NVLIBS:-}:${LD_LIBRARY_PATH:-}"
+# gcc/14's libstdc++ MUST come first: the binary needs its newer CXXABI, but
+# TensorFlow (built in a python-waterboa venv) pulls waterboa's older libstdc++
+# via its runpath, which lacks CXXABI_1.3.15. Prepend the gcc lib dir to win.
+GCC_LIB="$(dirname "$(g++ -print-file-name=libstdc++.so.6 2>/dev/null)")"
+export LD_LIBRARY_PATH="$GCC_LIB:${TF_PYLIB:-}:${NVLIBS:-}:${LD_LIBRARY_PATH:-}"
 
 # System size: default 16^3 = 16,384 atoms to compare directly with the other
 # machines. These GPUs have 96-180 GB HBM, so bump it for a showcase run, e.g.
