@@ -1,9 +1,31 @@
 # DAIS GRACE benchmark — status & handoff
 
-Last updated: 2026-07-06. Goal: run the GRACE benchmark on DAIS's NVIDIA GPUs
-(H200, B200, RTX PRO 6000), same as the other machines. **Build succeeds;
-blocked at runtime: TensorFlow falls back to CPU (`platform Host`) because the
-bundled `libtensorflow-gpu 2.18.0` can't `dlopen` its CUDA libraries.**
+Last updated: 2026-07-07. Goal: run the GRACE benchmark on DAIS's NVIDIA GPUs
+(H200, B200, RTX PRO 6000), same as the other machines. **H200 RESOLVED &
+benchmarked** (1L 114.26, 2L 19.80 katom-step/s — ~2× A100). B200 / RTX PRO 6000
+still pending a run.
+
+## RESOLUTION (2026-07-07) — what unblocked H200
+
+The CPU fallback was a chain of runtime issues, all now fixed:
+1. **Driver not found** → TF logged `Could not find cuda drivers`; the driver
+   `libcuda.so.1` lives in `/usr/lib64` (node-local, not in the nvidia wheels).
+   Fix: prepend `/usr/lib64` to `LD_LIBRARY_PATH`.
+2. **No CUDA wheels in the venv** → `tf-cuda` had plain `tensorflow==2.18.0`.
+   Fix: `pip install 'tensorflow[and-cuda]==2.18.0'` (PTMP cache/tmp), then add
+   all `nvidia/*/lib` dirs to `LD_LIBRARY_PATH`. After this, Python TF saw the H200.
+3. **XLA GPU platform not registered** → the binary linked the *downloaded C-API
+   tarball* `libtensorflow.so.2.18.0`, which lacks the XLA GPU platform the GRACE
+   saved-models need → `NOT_FOUND: could not find registered platform with id`.
+   Fix (strategy #2, matches raven): **rebuild against the venv's full
+   `libtensorflow_cc.so.2`** — build with `PYTHON=.../tf-cuda/bin/python` and
+   **no** `TF_LIB_FILE` (Python's `tf.sysconfig` supplies both the lib and the C
+   headers; setting `TF_LIB_FILE` broke the header path). At runtime the venv's
+   `site-packages/tensorflow` must be on `LD_LIBRARY_PATH` (it's the only TF copy
+   now, so no registry split), plus the gcc/14 `libstdc++` `LD_PRELOAD` for CXXABI.
+
+The working submit script is `bench/run-dais-grace.slurm` (self-contained, with a
+pre-flight that verifies binary/input/models/CUDA/GPU and aborts loudly).
 
 ## Where the GRACE benchmark stands (all machines, fcc-Cu 16k)
 
@@ -12,7 +34,8 @@ bundled `libtensorflow-gpu 2.18.0` can't `dlopen` its CUDA libraries.**
 | cmmg | 256-core EPYC (CPU) | 10.03 | 3.61 | ✅ done |
 | raven | 1× A100 (TF-CUDA) | 57.53 | 12.82 | ✅ done |
 | viper | 1× MI300A (TF-ROCm) | 4.33 | 0.94 | ✅ done (slow; TF-ROCm) |
-| **DAIS** | H200 / B200 / RTX PRO 6000 | — | — | ⛔ **blocked (this doc)** |
+| **DAIS** | 1× H200 (TF-CUDA) | 114.26 | 19.80 | ✅ done (~2× A100) |
+| **DAIS** | B200 / RTX PRO 6000 | — | — | ⏳ pending run (Blackwell — may hit TF 2.18/CUDA limit) |
 
 ## DAIS facts (confirmed 2026-07-06)
 
