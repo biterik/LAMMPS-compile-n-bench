@@ -198,6 +198,8 @@ A100 beats the newer MI300A purely on software maturity, not silicon.
 | viper-cpu | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | _pending_ | | CPU TF (slow) |
 | **viper** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **4.33** | 99.9% | 1 MI300A, TF-ROCm — GPU confirmed, ~13× slower than A100 (2026-07-06) |
 | **viper** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | **0.94** | 100% | 1 MI300A, TF-ROCm |
+| **DAIS** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **114.26** | 96.1% | 1 H200, TF-CUDA — ~2× A100 (2026-07-07) |
+| **DAIS** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | **19.80** | 99.5% | 1 H200, TF-CUDA — 1.54× A100 (2026-07-07) |
 
 ---
 

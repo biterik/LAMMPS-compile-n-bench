@@ -69,6 +69,7 @@ stable PACE builds: `build-lammps-<machine>-fork.sh` → `lmp_<machine>_fork`,
 | **raven** | `build-lammps-raven-fork.sh` | TF-CUDA | ✅ **built + benchmarked** (1L 57.53, 2L 12.82; GPU confirmed) |
 | viper-cpu | `build-lammps-viper-cpu-fork.sh` | n/a (CPU) | scripts ready — build + run |
 | **viper** | `build-lammps-viper-fork.sh` | TF-ROCm | ✅ **built + benchmarked** (1L 4.33, 2L 0.94; MI300A confirmed on-GPU, ~13× slower than A100) |
+| **DAIS** | `build-lammps-dais-fork.sh` | TF-CUDA | ✅ **H200 built + benchmarked** (1L 114.26, 2L 19.80; ~2× A100). B200 / RTX PRO 6000 pending. Fix: link venv `libtensorflow_cc.so.2`, not the C-API tarball, so the XLA GPU platform registers (see DAIS-STATUS.md). |
 
 **Key result:** one A100 (TF-CUDA) is **5.7× (1L) / 3.5× (2L)** faster than the
 full 256-core cmmg node; 2L GPU = 64.5 µs/atom (published A100 range). GRACE
