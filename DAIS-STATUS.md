@@ -1,9 +1,20 @@
 # DAIS GRACE benchmark — status & handoff
 
-Last updated: 2026-07-07. Goal: run the GRACE benchmark on DAIS's NVIDIA GPUs
-(H200, B200, RTX PRO 6000), same as the other machines. **H200 RESOLVED &
-benchmarked** (1L 114.26, 2L 19.80 katom-step/s — ~2× A100). B200 / RTX PRO 6000
-still pending a run.
+Last updated: 2026-07-10. Goal: run the GRACE benchmark on DAIS's NVIDIA GPUs
+(H200, B200, RTX PRO 6000), same as the other machines. **ALL THREE DONE.** The
+same serial `lmp_dais_fork` binary + TF-CUDA venv (strategy #2) ran on every NVIDIA
+generation — Blackwell needed no separate build:
+
+| GPU | Arch | 1L katom-step/s | 2L katom-step/s | Date |
+|---|---|--:|--:|---|
+| **B200** | Blackwell (sm_100) | **147.00** | **25.28** | 2026-07-10 |
+| **H200** | Hopper (sm_90) | 114.26 | 19.80 | 2026-07-07 |
+| **RTX PRO 6000** | Blackwell (sm_100), 96 GB GDDR7 | 54.59 | 16.86 | 2026-07-10 |
+
+**B200 is the fastest single device in the whole project** (2.6× an A100 on 1L). The
+earlier worry that "Blackwell may hit the TF 2.18 / CUDA 12.x limit" did **not**
+materialise, because we no longer link the pinned 2.18 C-API tarball — see the
+Blackwell note directly below.
 
 ## RESOLUTION (2026-07-07) — what unblocked H200
 
@@ -27,6 +38,35 @@ The CPU fallback was a chain of runtime issues, all now fixed:
 The working submit script is `bench/run-dais-grace.slurm` (self-contained, with a
 pre-flight that verifies binary/input/models/CUDA/GPU and aborts loudly).
 
+## BLACKWELL RESOLUTION (2026-07-10) — B200 & RTX PRO 6000
+
+**They just worked** on the H200 recipe — no rebuild, no new binary, no per-arch
+compilation. This is the payoff of the serial + TF-CUDA design: GRACE runs through
+TensorFlow, not Kokkos, so there is **no `sm_90` vs `sm_100` GPU-arch compile** to
+get wrong; TF's own CUDA kernels target whatever device the job lands on.
+
+The one thing that mattered was **not** being pinned to the old TF 2.18 C-API
+tarball. Because the binary is linked against the **venv's `libtensorflow_cc.so.2`
+(strategy #2)** and the venv is built with an **unpinned `pip install tensorflow`**
+(the current CUDA build, ≥ 2.19 shipping CUDA 12.8+ `nvidia-cu12` wheels), the TF
+runtime already carries Blackwell-capable (sm_100) kernels. So the same
+`run-dais-grace.slurm`, only changing `--gres` (`gpu:b200:1`, `gpu:rtx_pro_6000:1`)
+and the `GPU=` log tag, produced valid on-GPU runs on both Blackwell parts.
+
+> **Record the exact TF/CUDA version.** The venv is unpinned, so "what worked"
+> drifts as `pip` pulls newer wheels. Capture it once for reproducibility:
+> `tf-cuda/bin/pip show tensorflow` and `tf-cuda/bin/python -c "import tensorflow as
+> tf; print(tf.__version__, tf.sysconfig.get_build_info()['cuda_version'])"`, and
+> paste the two lines here. (If you ever need to *pin* for a clean rebuild, pin that
+> exact `tensorflow==X.Y.Z` — just make sure it still ships `libtensorflow_cc.so.2`,
+> which is what strategy #2 links against.)
+
+**Result:** on 1L, **B200 (147) > H200 (114) > RTX PRO 6000 (54.6)**; on 2L,
+**B200 (25.3) > H200 (19.8) > RTX PRO 6000 (16.9)**. The RTX PRO 6000 (a
+workstation Blackwell card) lands right around the A100 (1L) and beats it on 2L —
+the price/performance standout. Full cross-machine analysis + prices live in
+`HARDWARE-GUIDE.md`.
+
 ## Where the GRACE benchmark stands (all machines, fcc-Cu 16k)
 
 | Machine | GPU/CPU | 1L katom-step/s | 2L katom-step/s | State |
@@ -34,8 +74,9 @@ pre-flight that verifies binary/input/models/CUDA/GPU and aborts loudly).
 | cmmg | 256-core EPYC (CPU) | 10.03 | 3.61 | ✅ done |
 | raven | 1× A100 (TF-CUDA) | 57.53 | 12.82 | ✅ done |
 | viper | 1× MI300A (TF-ROCm) | 4.33 | 0.94 | ✅ done (slow; TF-ROCm) |
-| **DAIS** | 1× H200 (TF-CUDA) | 114.26 | 19.80 | ✅ done (~2× A100) |
-| **DAIS** | B200 / RTX PRO 6000 | — | — | ⏳ pending run (Blackwell — may hit TF 2.18/CUDA limit) |
+| **DAIS** | 1× H200 (TF-CUDA) | 114.26 | 19.80 | ✅ done (2.0× A100) |
+| **DAIS** | 1× B200 (TF-CUDA) | 147.00 | 25.28 | ✅ done (**fastest**; 2.6× A100, 1.29× H200) |
+| **DAIS** | 1× RTX PRO 6000 (TF-CUDA) | 54.59 | 16.86 | ✅ done (≈ A100 on 1L, 1.3× A100 on 2L) |
 
 ## DAIS facts (confirmed 2026-07-06)
 
@@ -104,7 +145,11 @@ pre-flight that verifies binary/input/models/CUDA/GPU and aborts loudly).
      `TF_CPP_MIN_LOG_LEVEL=3`, which hides the "Could not load dynamic library
      'X'" lines).
 
-## Immediate next step (do this first on a fresh start)
+## Debug recipe (historical — kept in case a fresh venv regresses)
+
+> **No longer needed for normal runs** — all three GPUs work (see the Blackwell
+> resolution above). Keep this only as the go-to if a rebuilt/updated `tf-cuda`
+> venv ever falls back to CPU again.
 
 Get the **exact missing library** with a verbose run on `gpu1`, and list what
 CUDA wheels are actually installed:
