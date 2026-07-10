@@ -334,6 +334,12 @@ Note the fork has **no `grace/fs/kk`**, so GPU GRACE goes through TensorFlow
 download/export, and the per-machine matrix are in **[GRACE.md](GRACE.md)**;
 the fork base/rebase analysis is in **[FORK-ANALYSIS.md](FORK-ANALYSIS.md)**.
 
+GRACE now runs on all three DAIS NVIDIA GPUs — **B200** (fastest overall), **H200**,
+and **RTX PRO 6000** (best price/performance) — from one serial TF-CUDA binary; see
+**[DAIS-STATUS.md](DAIS-STATUS.md)**. For choosing hardware — measured throughput,
+system-size/atom capacity, the TensorFlow-version caveats, rough prices, and buy
+recommendations — see **[HARDWARE-GUIDE.md](HARDWARE-GUIDE.md)**.
+
 ## License
 
 [MIT](LICENSE) © 2026 Erik Bitzek. LAMMPS itself is GPL-2.0 and is fetched from

@@ -188,6 +188,19 @@ The **MI300A APU** runs GRACE via TF-ROCm (gfx942, confirmed on-GPU) but is
 these graph-ACE ops are far less optimized than TF-CUDA. So on this benchmark the
 A100 beats the newer MI300A purely on software maturity, not silicon.
 
+**NVIDIA generations (DAIS, 2026-07-10).** All three DAIS NVIDIA GPU types now run
+GRACE from the *same* serial `lmp_dais_fork` binary (TF-CUDA, strategy #2 — see
+below and DAIS-STATUS.md). Ranked on 1L: **B200 (147) > H200 (114) > A100 (57.5) ≈
+RTX PRO 6000 (54.6) ≫ MI300A (4.3)**; on the heavier 2L: **B200 (25.3) > H200 (19.8)
+> RTX PRO 6000 (16.9) > A100 (12.8) ≫ MI300A (0.94)**. Two takeaways: (i) the
+**B200 is the fastest single device** here — 2.6× an A100 (1L), 1.29× an H200; and
+(ii) the **RTX PRO 6000** — a workstation-class Blackwell card at a fraction of a
+datacenter GPU's price — **matches the A100 on 1L and beats it (~1.3×) on 2L**, so
+it's the standout price/performance point. Note the DAIS runs differ only in host
+OMP threads (8/12/16); GRACE is >97 % GPU-bound (Pair%), so that host difference is
+noise, not the cause of the ranking. Full buy-vs-buy analysis, atom capacities, and
+prices are in **[HARDWARE-GUIDE.md](HARDWARE-GUIDE.md)**.
+
 | Machine | Model | pair_style | TF? | atoms | nsteps | katom-step/s | Pair% | Notes |
 |---|---|---|:--:|--:|--:|--:|--:|---|
 | cmmg | 1L-SMAX-OMAT-L | grace/1layer/chunk | yes | 16384 | 100 | **10.03** | 81.4% | full node, 256 ranks (2026-07-01) |
@@ -198,8 +211,12 @@ A100 beats the newer MI300A purely on software maturity, not silicon.
 | viper-cpu | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | _pending_ | | CPU TF (slow) |
 | **viper** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **4.33** | 99.9% | 1 MI300A, TF-ROCm — GPU confirmed, ~13× slower than A100 (2026-07-06) |
 | **viper** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 20 | **0.94** | 100% | 1 MI300A, TF-ROCm |
-| **DAIS** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **114.26** | 96.1% | 1 H200, TF-CUDA — ~2× A100 (2026-07-07) |
+| **DAIS** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **147.00** | 97.1% | 1 **B200** (Blackwell), TF-CUDA — **fastest**; 2.6× A100, 1.29× H200 (2026-07-10) |
+| **DAIS** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | **25.28** | 99.6% | 1 **B200**, TF-CUDA — **fastest**; 2.0× A100, 1.28× H200 (2026-07-10) |
+| **DAIS** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **114.26** | 96.1% | 1 H200 (Hopper), TF-CUDA — 2.0× A100 (2026-07-07) |
 | **DAIS** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | **19.80** | 99.5% | 1 H200, TF-CUDA — 1.54× A100 (2026-07-07) |
+| **DAIS** | 1L-SMAX-OMAT-L | grace | yes | 16384 | 100 | **54.59** | 99.1% | 1 **RTX PRO 6000** (Blackwell, 96 GB GDDR7), TF-CUDA — ≈ A100 (2026-07-10) |
+| **DAIS** | 2L-SMAX-OMAT-M | grace/2layer/chunk | yes | 16384 | 50 | **16.86** | 99.8% | 1 **RTX PRO 6000**, TF-CUDA — 1.3× A100 (2026-07-10) |
 
 ---
 
