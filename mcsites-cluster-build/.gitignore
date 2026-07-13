@@ -1,0 +1,7 @@
+_to_delete/
+lammps-mcsites/
+build-mcsites-*/
+voro++-*/
+kim-api-*/
+hipcc-cxx17
+*.log

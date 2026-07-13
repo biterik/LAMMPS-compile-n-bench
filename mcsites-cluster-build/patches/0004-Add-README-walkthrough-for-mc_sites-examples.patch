@@ -1,0 +1,139 @@
+From 8a28f8594391a11c4429020d680857574e8401ea Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Wed, 8 Jul 2026 14:23:57 +0200
+Subject: [PATCH 4/5] Add README walkthrough for mc_sites examples
+
+---
+ examples/PACKAGES/mc_sites/README.md | 120 +++++++++++++++++++++++++++
+ 1 file changed, 120 insertions(+)
+ create mode 100644 examples/PACKAGES/mc_sites/README.md
+
+diff --git a/examples/PACKAGES/mc_sites/README.md b/examples/PACKAGES/mc_sites/README.md
+new file mode 100644
+index 0000000..d4e7b2d
+--- /dev/null
++++ b/examples/PACKAGES/mc_sites/README.md
+@@ -0,0 +1,120 @@
++# Examples: `fix mc/sites` + `compute sites/voronoi`
++
++Two small, fast examples (each runs in well under a second, serial or on 4 ranks) that
++demonstrate site-resolved lattice-gas Monte Carlo on a Voronoi-derived interstitial-site
++catalogue. For the full command semantics and the science, see the manual pages
++[`fix mc/sites`](../../../doc/src/fix_mc_sites.rst) and
++[`compute sites/voronoi`](../../../doc/src/compute_sites_voronoi.rst). During the pre-PR
++review, the build instructions and project context are in the MC-SITES-LAMMPS project
++README that accompanies this `feature/mc-sites` branch.
++
++## Prerequisites
++
++A LAMMPS binary built with the `MC` and `VORONOI` packages (on the GRACE fork, also
++`ML-PACE` — see the build gotcha in the root README). Below, `lmp` is that binary.
++
++```bash
++# serial
++lmp -in in.mc_sites.langmuir
++# parallel
++mpirun -np 4 lmp -in in.mc_sites.langmuir
++```
++
++Reference logs are committed next to each input
++(`log.11Feb2026.mc_sites.*.appleclang.{1,4}`) so you can diff your run against a known-good
++result.
++
++---
++
++## Example 1 — `in.mc_sites.langmuir` (start here)
++
++**What it is.** The cleanest possible correctness check: a non-interacting lattice gas. An
++fcc host (Ni-mass atoms, `pair_style zero` so there are *no* interactions) with the dynamic
++`sites/voronoi` catalogue windowed by `rmin 1.6` to select exactly the octahedral
++interstitial sites. Grand-canonical trials run at chemical potential μ = 0.
++
++**What to expect.** With no interactions, ΔU = 0 for every trial, so each site is occupied
++independently with probability θ = 1 / (1 + e^(−μ/kT)). At **μ = 0 this is exactly
++θ = 0.5.** Watch the `f_MC[6]` column (instantaneous site concentration) converge to 0.5 as
++the run proceeds:
++
++```
++thermo_style custom step atoms f_MC[4] f_MC[5] f_MC[6] f_MC[7]
++#                              N_spec  M       theta   accept
++```
++
++The occupancy fluctuates around 0.5; over the run it should average to 0.5 within a couple
++of percent. Change `mu 0.0` to `mu 0.04` or `mu -0.04` and θ should shift up/down along the
++analytic Langmuir isotherm (the full isotherm is checked in `tests/test_8_2_langmuir.py`).
++
++**Key commands.**
++
++```
++compute SITES all sites/voronoi rmerge 0.3 rmin 1.6 rmax 2.0
++fix     MC    all mc/sites 1 20 2 29494 300.0 sites c_SITES mode gc mu 0.0
++#                          |  |  |  |     |     |     |            |
++#                    Nevery |  |  seed   T(K)  sites= the compute  lattice-gas mu (eV)
++#                       Ntrials |
++#                          MC species atom type
++```
++
++---
++
++## Example 2 — `in.mc_sites.dynamic` (hybrid MD/MC)
++
++**What it is.** The realistic use case: MC coupled to running MD. An `lj/cut` fcc host is
++thermostatted at 30 K with `fix nvt`; every 10 MD steps one MC block of 20 grand-canonical
++trials runs on the **current** Voronoi-vertex catalogue, so the site list follows the
++thermal displacements of the host from step to step.
++
++**What to expect.** A stable hybrid run: finite total energy, no lost atoms, temperature
++bounded, and a populated catalogue that is rebuilt every block from the instantaneous
++geometry. Because the host now *interacts* with the inserted species (attractive `lj`
++cross-term), the occupancy at a given μ sits higher than the non-interacting μ = 0 value —
++this is the physics the method is for. `f_MC[7]` (acceptance ratio) stays healthy because
++insertions are proposed only at real interstitial sites.
++
++```
++fix INT all nvt temp 30.0 30.0 0.05
++fix MC  all mc/sites 10 20 2 62717 300.0 sites c_SITES mode gc mu -0.15
++```
++
++Note the two temperatures are independent and intentional: 30 K is the *MD* host
++temperature, 300 K is the *MC* sampling temperature in the acceptance rule.
++
++---
++
++## Reading the `fix mc/sites` output vector
++
++The fix exposes a global vector of length 8 (all values intensive), accessible as
++`f_ID[i]`:
++
++| i | quantity |
++|---|---|
++| 1 | trial attempts (this run) |
++| 2 | accepted insertions |
++| 3 | accepted deletions |
++| 4 | current number of species atoms in the catalogue |
++| 5 | catalogue size M (empty + occupied) |
++| 6 | instantaneous site concentration = (4)/(5) |
++| 7 | overall acceptance ratio |
++| 8 | skipped `source`-mode insertions |
++
++For the Langmuir check the quantity of interest is **`f_MC[6]` → 0.5**. For source-mode
++(irradiation) runs, `f_MC[8]` counts insertions skipped because the catalogue was exhausted
++or a site failed the `overlap_cutoff` guard.
++
++---
++
++## Troubleshooting
++
++- **"accepted site clearance exceeds the ghost cutoff" warning** from the compute: a site's
++  empty sphere is larger than the communication cutoff, so its tessellation may be
++  incomplete. Increase the ghost cutoff with `comm_modify cutoff <r>` or tighten `rmax`.
++- **Occupancy stuck at 0 or 1:** check the sign/magnitude of `mu` and that `rmin/rmax`
++  actually select sites (the global scalar `c_SITES` is the site count; dump it if unsure).
++- **Build fails with `pair_pace.h not found`:** that is the fork's `MC`→`ML-PACE` coupling,
++  not this example — add `-D PKG_ML-PACE=on -D NO_GRACE_TF=1` (see the root README).
++- **Serial vs parallel differ:** small statistical differences are expected (different RNG
++  streams per rank); the isotherm mean must still match. Determinism is checked in
++  `tests/test_8_9_parallel.py`.
+-- 
+2.54.0
+

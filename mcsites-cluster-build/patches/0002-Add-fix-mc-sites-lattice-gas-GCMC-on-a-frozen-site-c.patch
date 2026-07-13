@@ -1,0 +1,1142 @@
+From 886415d20bba1042142873d2b3214af994b6de7b Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Tue, 7 Jul 2026 21:45:13 +0200
+Subject: [PATCH 2/5] Add fix mc/sites: lattice-gas GCMC on a frozen site
+ catalogue
+
+gc + source modes; catalogue = empty sites (compute or static file) +
+occupied entries (species atoms); synchronized RanPark proposals and
+lattice-gas acceptance min(1,exp(-beta(dU-/+mu))) on all ranks, owner
+executes; full-energy dU (gcmc pattern) with upstream ENERGY_ONLY hint
++ GRACE compute_energy_only extract hook; real-delete trial with exact
+pack/unpack_exchange restore on reject; equal-style Temp/mu variables;
+tfac_insert/charge/maxspecies/overlap_cutoff keywords; restart of RNG
+state + counters; 8-slot output vector.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01E5m4kr1kzqsqfBYcMWckk7
+---
+ src/MC/fix_mc_sites.cpp | 991 ++++++++++++++++++++++++++++++++++++++++
+ src/MC/fix_mc_sites.h   | 112 +++++
+ 2 files changed, 1103 insertions(+)
+ create mode 100644 src/MC/fix_mc_sites.cpp
+ create mode 100644 src/MC/fix_mc_sites.h
+
+diff --git a/src/MC/fix_mc_sites.cpp b/src/MC/fix_mc_sites.cpp
+new file mode 100644
+index 0000000..55c79a0
+--- /dev/null
++++ b/src/MC/fix_mc_sites.cpp
+@@ -0,0 +1,991 @@
++/* ----------------------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++/* ----------------------------------------------------------------------
++   Contributing author: Erik Bitzek (erik.bitzek@googlemail.com)
++
++   Lattice-gas grand-canonical (and fixed-rate source) Monte Carlo on a
++   frozen per-block catalogue of geometry-derived sites, for hybrid MD/MC.
++   Empty sites come from a sites-producing compute (e.g. sites/voronoi) or
++   a static file; occupied sites are the current species atoms themselves.
++   Move mechanics follow fix gcmc (synchronized RanPark proposals and
++   acceptance on all ranks, owning rank executes, collective full-energy
++   evaluation); the acceptance is the lattice-gas convention
++   min(1, exp(-beta*(dU -/+ mu))) with the fix's own mu reference (no
++   ideal-gas factors).
++------------------------------------------------------------------------- */
++
++#include "fix_mc_sites.h"
++
++#include "angle.h"
++#include "atom.h"
++#include "atom_vec.h"
++#include "bond.h"
++#include "comm.h"
++#include "dihedral.h"
++#include "improper.h"
++#include "compute.h"
++#include "domain.h"
++#include "error.h"
++#include "force.h"
++#include "group.h"
++#include "input.h"
++#include "kspace.h"
++#include "memory.h"
++#include "modify.h"
++#include "neighbor.h"
++#include "pair.h"
++#include "random_park.h"
++#include "region.h"
++#include "update.h"
++#include "variable.h"
++
++#include <cmath>
++#include <cstring>
++
++using namespace LAMMPS_NS;
++using namespace FixConst;
++
++enum { MODE_GC, MODE_SOURCE };
++
++static constexpr double MAXENERGYTEST = 1.0e50;    // fix gcmc overlap guard convention
++static constexpr int CATDELTA = 4096;              // catalogue grow chunk
++// numerically equal to upstream force.h ENERGY_ONLY (absent in this fork's
++// enum); harmless extra eflag bit where unknown, energy-only hint upstream
++static constexpr int ENERGY_ONLY_HINT = 0x04;
++static constexpr int OFFBAND_WARN_BLOCKS = 10;     // acceptance-ratio warning patience
++
++/* ---------------------------------------------------------------------- */
++
++FixMCSites::FixMCSites(LAMMPS *lmp, int narg, char **arg) :
++    Fix(lmp, narg, arg), temp_var_name(nullptr), mu_var_name(nullptr), idsites_compute(nullptr),
++    sites_compute(nullptr), sites_file(nullptr), file_xyz(nullptr), idregion(nullptr),
++    region(nullptr), random_equal(nullptr), random_unequal(nullptr), c_pe(nullptr),
++    grace_energy_only(nullptr), sublo(nullptr), subhi(nullptr), exchbuf(nullptr),
++    catalog(nullptr)
++{
++  if (narg < 8) utils::missing_cmd_args(FLERR, "fix mc/sites", error);
++
++  mcs_nevery = utils::inumeric(FLERR, arg[3], false, lmp);
++  ntrials = utils::inumeric(FLERR, arg[4], false, lmp);
++  mcs_type = utils::expand_type_int(FLERR, arg[5], Atom::ATOM, lmp);
++  seed = utils::inumeric(FLERR, arg[6], false, lmp);
++
++  if (mcs_nevery <= 0) error->all(FLERR, "Fix mc/sites Nevery must be > 0, got {}", mcs_nevery);
++  if (ntrials < 0) error->all(FLERR, "Fix mc/sites Ntrials must be >= 0, got {}", ntrials);
++  if (seed <= 0) error->all(FLERR, "Fix mc/sites seed must be > 0, got {}", seed);
++
++  temp = 0.0;
++  temp_var = -1;
++  if (utils::strmatch(arg[7], "^v_")) {
++    temp_var_name = utils::strdup(arg[7] + 2);
++  } else {
++    temp = utils::numeric(FLERR, arg[7], false, lmp);
++    if (temp <= 0.0) error->all(FLERR, "Fix mc/sites temperature must be > 0.0, got {}", temp);
++  }
++
++  // defaults
++
++  mode = MODE_GC;
++  mu = 0.0;
++  mu_var = -1;
++  rate = 0;
++  tfac_insert = 1.0;
++  charge_val = 0.0;
++  charge_flag = 0;
++  maxspecies = -1;
++  overlap_cutoff = 0.0;
++  nfile_sites = 0;
++
++  int mode_set = 0, sites_set = 0;
++
++  int iarg = 8;
++  while (iarg < narg) {
++    if (strcmp(arg[iarg], "sites") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites sites", error);
++      if (utils::strmatch(arg[iarg + 1], "^c_")) {
++        delete[] idsites_compute;
++        idsites_compute = utils::strdup(arg[iarg + 1] + 2);
++        iarg += 2;
++      } else if (strcmp(arg[iarg + 1], "file") == 0) {
++        if (iarg + 3 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites sites file", error);
++        delete[] sites_file;
++        sites_file = utils::strdup(arg[iarg + 2]);
++        iarg += 3;
++      } else
++        error->all(FLERR, "Fix mc/sites sites argument must be c_ID or file <path>, got {}",
++                   arg[iarg + 1]);
++      sites_set = 1;
++    } else if (strcmp(arg[iarg], "mode") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites mode", error);
++      if (strcmp(arg[iarg + 1], "gc") == 0) {
++        if (iarg + 4 > narg || strcmp(arg[iarg + 2], "mu") != 0)
++          error->all(FLERR, "Fix mc/sites mode gc requires: mode gc mu <value>");
++        if (utils::strmatch(arg[iarg + 3], "^v_"))
++          mu_var_name = utils::strdup(arg[iarg + 3] + 2);
++        else
++          mu = utils::numeric(FLERR, arg[iarg + 3], false, lmp);
++        mode = MODE_GC;
++        iarg += 4;
++      } else if (strcmp(arg[iarg + 1], "source") == 0) {
++        if (iarg + 4 > narg || strcmp(arg[iarg + 2], "rate") != 0)
++          error->all(FLERR, "Fix mc/sites mode source requires: mode source rate <n>");
++        rate = utils::inumeric(FLERR, arg[iarg + 3], false, lmp);
++        if (rate <= 0) error->all(FLERR, "Fix mc/sites source rate must be > 0, got {}", rate);
++        mode = MODE_SOURCE;
++        iarg += 4;
++      } else
++        error->all(FLERR, "Unknown fix mc/sites mode: {}", arg[iarg + 1]);
++      mode_set = 1;
++    } else if (strcmp(arg[iarg], "region") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites region", error);
++      delete[] idregion;
++      idregion = utils::strdup(arg[iarg + 1]);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "tfac_insert") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites tfac_insert", error);
++      tfac_insert = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      if (tfac_insert <= 0.0)
++        error->all(FLERR, "Fix mc/sites tfac_insert must be > 0.0, got {}", tfac_insert);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "charge") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites charge", error);
++      charge_val = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      charge_flag = 1;
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "maxspecies") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites maxspecies", error);
++      maxspecies = utils::bnumeric(FLERR, arg[iarg + 1], false, lmp);
++      if (maxspecies < 0)
++        error->all(FLERR, "Fix mc/sites maxspecies must be >= 0, got {}", maxspecies);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "overlap_cutoff") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites overlap_cutoff", error);
++      overlap_cutoff = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      if (overlap_cutoff < 0.0)
++        error->all(FLERR, "Fix mc/sites overlap_cutoff must be >= 0.0, got {}", overlap_cutoff);
++      iarg += 2;
++    } else
++      error->all(FLERR, "Unknown fix mc/sites keyword: {}", arg[iarg]);
++  }
++
++  if (!sites_set)
++    error->all(FLERR, "Fix mc/sites requires the sites keyword (sites c_ID or sites file <path>)");
++  if (!mode_set) error->all(FLERR, "Fix mc/sites requires the mode keyword (gc or source)");
++
++  // output vector: attempts, accepted insertions, accepted deletions,
++  // N_species, catalogue size M, c = N/M, acceptance ratio, source skips
++
++  vector_flag = 1;
++  size_vector = 8;
++  global_freq = 1;
++  extvector = 0;
++  restart_global = 1;
++
++  random_equal = new RanPark(lmp, seed);
++  random_unequal = new RanPark(lmp, seed);
++
++  force_reneighbor = 1;
++  next_reneighbor = update->ntimestep + 1;
++
++  ncatalog = maxcatalog = 0;
++  exchbufsize = 0;
++  triclinic = domain->triclinic;
++  groupbitall = 1 | groupbit;
++
++  nattempts = ninsert_acc = ndelete_acc = nsource_skip = 0.0;
++  nspecies_out = ncatalog_out = 0.0;
++  nblocks_offband = 0;
++  energy_stored = 0.0;
++  beta = sigma = gas_mass = 0.0;
++}
++
++/* ---------------------------------------------------------------------- */
++
++FixMCSites::~FixMCSites()
++{
++  delete random_equal;
++  delete random_unequal;
++  delete[] temp_var_name;
++  delete[] mu_var_name;
++  delete[] idsites_compute;
++  delete[] sites_file;
++  delete[] idregion;
++  memory->destroy(file_xyz);
++  memory->destroy(exchbuf);
++  memory->sfree(catalog);
++}
++
++/* ---------------------------------------------------------------------- */
++
++int FixMCSites::setmask()
++{
++  int mask = 0;
++  mask |= PRE_EXCHANGE;
++  return mask;
++}
++
++/* ---------------------------------------------------------------------- */
++
++void FixMCSites::init()
++{
++  triclinic = domain->triclinic;
++
++  if (domain->dimension == 2) error->all(FLERR, "Cannot use fix mc/sites in a 2d simulation");
++  if (atom->tag_enable == 0) error->all(FLERR, "Fix mc/sites requires atom IDs");
++  if (!atom->mass) error->all(FLERR, "Fix mc/sites requires per atom type masses");
++  if (mcs_type <= 0 || mcs_type > atom->ntypes)
++    error->all(FLERR, "Invalid atom type {} in fix mc/sites command", mcs_type);
++  gas_mass = atom->mass[mcs_type];
++  if (gas_mass <= 0.0) error->all(FLERR, "Fix mc/sites species type {} has no mass", mcs_type);
++  if (charge_flag && !atom->q_flag)
++    error->all(FLERR, "Fix mc/sites charge keyword requires an atom style with charge");
++  if (neighbor->build_once)
++    error->all(FLERR, "Cannot use fix mc/sites with neigh_modify once yes: "
++                      "reneighboring is required after every MC block");
++
++  // the fix resolves owners of catalogue entries through the global atom map;
++  // create one if absent (same pattern as the GRACE pair styles)
++
++  if (atom->map_style == Atom::MAP_NONE) {
++    atom->map_init();
++    atom->map_set();
++  }
++
++  if (idregion) {
++    region = domain->get_region_by_id(idregion);
++    if (!region) error->all(FLERR, "Region {} for fix mc/sites does not exist", idregion);
++  }
++
++  if (idsites_compute) {
++    sites_compute = modify->get_compute_by_id(idsites_compute);
++    if (!sites_compute)
++      error->all(FLERR, "Compute {} for fix mc/sites does not exist", idsites_compute);
++    if (!sites_compute->local_flag || sites_compute->size_local_cols < 4)
++      error->all(FLERR,
++                 "Compute {} for fix mc/sites must produce a local array with at least "
++                 "columns x y z clearance (e.g. compute sites/voronoi)",
++                 idsites_compute);
++  }
++
++  if (temp_var_name) {
++    temp_var = input->variable->find(temp_var_name);
++    if (temp_var < 0)
++      error->all(FLERR, "Variable {} for fix mc/sites temperature does not exist", temp_var_name);
++    if (!input->variable->equalstyle(temp_var))
++      error->all(FLERR, "Variable {} for fix mc/sites temperature is not equal-style",
++                 temp_var_name);
++    temp = input->variable->compute_equal(temp_var);
++    if (temp <= 0.0)
++      error->all(FLERR, "Fix mc/sites temperature variable gave {}, must be > 0.0", temp);
++  }
++  if (mu_var_name) {
++    mu_var = input->variable->find(mu_var_name);
++    if (mu_var < 0)
++      error->all(FLERR, "Variable {} for fix mc/sites mu does not exist", mu_var_name);
++    if (!input->variable->equalstyle(mu_var))
++      error->all(FLERR, "Variable {} for fix mc/sites mu is not equal-style", mu_var_name);
++  }
++
++  // exactly one mc/sites fix may drive a given species type
++
++  for (auto &ifix : modify->get_fix_by_style("^mc/sites")) {
++    auto other = dynamic_cast<FixMCSites *>(ifix);
++    if (other && other != this && other->species_type() == mcs_type)
++      error->all(FLERR, "Fix mc/sites instances {} and {} both drive atom type {}", id, other->id,
++                 mcs_type);
++  }
++
++  c_pe = modify->get_compute_by_id("thermo_pe");
++  if (!c_pe) error->all(FLERR, "Fix mc/sites could not find the thermo_pe compute");
++
++  // GRACE energy-only hook: fork pair styles expose an int flag via extract();
++  // returns null (and stays unused) for every other pair style
++
++  grace_energy_only = nullptr;
++  if (force->pair) {
++    int dim;
++    grace_energy_only = (int *) force->pair->extract("compute_energy_only", dim);
++  }
++
++  if (sites_file && !file_xyz) read_sites_file();
++}
++
++/* ----------------------------------------------------------------------
++   read the static site list: one "x y z" triple per line, # comments and
++   blank lines ignored; positions are remapped into the periodic box
++------------------------------------------------------------------------- */
++
++void FixMCSites::read_sites_file()
++{
++  int nsites = 0;
++  double *buf = nullptr;
++
++  if (comm->me == 0) {
++    FILE *fp = fopen(sites_file, "r");
++    if (!fp) error->one(FLERR, "Cannot open fix mc/sites file {}: {}", sites_file,
++                        utils::getsyserror());
++    int maxsites = CATDELTA;
++    memory->create(buf, 3 * maxsites, "mc/sites:filebuf");
++    char line[1024];
++    int nline = 0;
++    while (fgets(line, 1024, fp)) {
++      nline++;
++      char *ptr = line;
++      while (*ptr == ' ' || *ptr == '\t') ptr++;
++      if (*ptr == '#' || *ptr == '\n' || *ptr == '\r' || *ptr == '\0') continue;
++      double xx, yy, zz;
++      if (sscanf(ptr, "%lg %lg %lg", &xx, &yy, &zz) != 3)
++        error->one(FLERR, "Fix mc/sites file {} line {} is not an x y z triple", sites_file,
++                   nline);
++      if (nsites == maxsites) {
++        maxsites += CATDELTA;
++        memory->grow(buf, 3 * maxsites, "mc/sites:filebuf");
++      }
++      buf[3 * nsites] = xx;
++      buf[3 * nsites + 1] = yy;
++      buf[3 * nsites + 2] = zz;
++      nsites++;
++    }
++    fclose(fp);
++    if (nsites == 0) error->one(FLERR, "Fix mc/sites file {} contains no sites", sites_file);
++  }
++
++  MPI_Bcast(&nsites, 1, MPI_INT, 0, world);
++  nfile_sites = nsites;
++  memory->create(file_xyz, nfile_sites, 3, "mc/sites:file_xyz");
++  if (comm->me == 0) memcpy(&file_xyz[0][0], buf, 3 * nfile_sites * sizeof(double));
++  memory->destroy(buf);
++  MPI_Bcast(&file_xyz[0][0], 3 * nfile_sites, MPI_DOUBLE, 0, world);
++
++  for (int i = 0; i < nfile_sites; i++) domain->remap(file_xyz[i]);
++
++  if (comm->me == 0)
++    utils::logmesg(lmp, "Fix mc/sites {} read {} sites from file {}\n", id, nfile_sites,
++                   sites_file);
++}
++
++/* ---------------------------------------------------------------------- */
++
++void FixMCSites::catalog_append(const double *xyz, double clearance, tagint tag)
++{
++  if (ncatalog == maxcatalog) {
++    maxcatalog += CATDELTA;
++    catalog = (SiteEntry *) memory->srealloc(catalog, maxcatalog * sizeof(SiteEntry),
++                                             "mc/sites:catalog");
++  }
++  catalog[ncatalog].x[0] = xyz[0];
++  catalog[ncatalog].x[1] = xyz[1];
++  catalog[ncatalog].x[2] = xyz[2];
++  catalog[ncatalog].clearance = clearance;
++  catalog[ncatalog].tag = tag;
++  ncatalog++;
++}
++
++/* ----------------------------------------------------------------------
++   build the frozen catalogue for this MC block, identical on all ranks:
++   empty entries from the sites compute (gathered) or the static file,
++   occupied entries = current species atoms in group (and region)
++------------------------------------------------------------------------- */
++
++void FixMCSites::build_catalog()
++{
++  ncatalog = 0;
++  if (region) region->prematch();
++
++  // occupied entries first: species atoms in group (and region), gathered
++  // globally; needed below to veto file-list sites that are already occupied
++
++  double **x = atom->x;
++  int *mask = atom->mask;
++  int *type = atom->type;
++  tagint *tag = atom->tag;
++  int nlocal = atom->nlocal;
++
++  int noccl = 0;
++  double *occbuf;
++  memory->create(occbuf, 4 * MAX(nlocal, 1), "mc/sites:occbuf");
++  for (int i = 0; i < nlocal; i++) {
++    if (!(mask[i] & groupbit)) continue;
++    if (type[i] != mcs_type) continue;
++    if (region && !region->match(x[i][0], x[i][1], x[i][2])) continue;
++    occbuf[4 * noccl] = x[i][0];
++    occbuf[4 * noccl + 1] = x[i][1];
++    occbuf[4 * noccl + 2] = x[i][2];
++    occbuf[4 * noccl + 3] = ubuf(tag[i]).d;
++    noccl++;
++  }
++
++  int nprocs = comm->nprocs;
++  int *orecvcounts, *odispls;
++  memory->create(orecvcounts, nprocs, "mc/sites:occrecv");
++  memory->create(odispls, nprocs, "mc/sites:occdispls");
++  int osendcount = 4 * noccl;
++  MPI_Allgather(&osendcount, 1, MPI_INT, orecvcounts, 1, MPI_INT, world);
++  int ototal = 0;
++  for (int p = 0; p < nprocs; p++) {
++    odispls[p] = ototal;
++    ototal += orecvcounts[p];
++  }
++  double *occall;
++  memory->create(occall, MAX(ototal, 1), "mc/sites:occall");
++  MPI_Allgatherv(occbuf, osendcount, MPI_DOUBLE, occall, orecvcounts, odispls, MPI_DOUBLE,
++                 world);
++  int nocc = ototal / 4;
++  memory->destroy(occbuf);
++  memory->destroy(orecvcounts);
++  memory->destroy(odispls);
++
++  // empty entries
++
++  if (sites_compute) {
++    if (!(sites_compute->invoked_flag & Compute::INVOKED_LOCAL)) {
++      sites_compute->compute_local();
++      sites_compute->invoked_flag |= Compute::INVOKED_LOCAL;
++    }
++    int nlocalrows = sites_compute->size_local_rows;
++    int cols = sites_compute->size_local_cols;
++    double **larray = sites_compute->array_local;
++
++    int nprocs = comm->nprocs;
++    int *recvcounts, *displs;
++    memory->create(recvcounts, nprocs, "mc/sites:recvcounts");
++    memory->create(displs, nprocs, "mc/sites:displs");
++    int sendcount = 4 * nlocalrows;
++    MPI_Allgather(&sendcount, 1, MPI_INT, recvcounts, 1, MPI_INT, world);
++    int ntotal = 0;
++    for (int p = 0; p < nprocs; p++) {
++      displs[p] = ntotal;
++      ntotal += recvcounts[p];
++    }
++    double *sendbuf, *recvbuf;
++    memory->create(sendbuf, MAX(sendcount, 1), "mc/sites:sendbuf");
++    memory->create(recvbuf, MAX(ntotal, 1), "mc/sites:recvbuf");
++    for (int i = 0; i < nlocalrows; i++) {
++      sendbuf[4 * i] = larray[i][0];
++      sendbuf[4 * i + 1] = larray[i][1];
++      sendbuf[4 * i + 2] = larray[i][2];
++      sendbuf[4 * i + 3] = larray[i][3];    // clearance
++    }
++    MPI_Allgatherv(sendbuf, sendcount, MPI_DOUBLE, recvbuf, recvcounts, displs, MPI_DOUBLE,
++                   world);
++    int nsites = ntotal / 4;
++    for (int i = 0; i < nsites; i++) {
++      double *xyz = &recvbuf[4 * i];
++      if (region && !region->match(xyz[0], xyz[1], xyz[2])) continue;
++      catalog_append(xyz, recvbuf[4 * i + 3], 0);
++    }
++    memory->destroy(sendbuf);
++    memory->destroy(recvbuf);
++    memory->destroy(recvcounts);
++    memory->destroy(displs);
++  } else {
++    // static file list (validation mode): no clearance information ->
++    // "infinite" clearance (overlap_cutoff and source-mode guards inactive).
++    // A file site currently holding a species atom is occupied, not empty:
++    // drop file entries within OCCEPS of an occupied entry (exact match up
++    // to fp: inserted atoms sit exactly at site positions; file mode
++    // assumes a frozen host, see the doc Restrictions)
++    const double OCCEPS = 1.0e-6;
++    const double occepssq = OCCEPS * OCCEPS;
++    for (int i = 0; i < nfile_sites; i++) {
++      if (region && !region->match(file_xyz[i][0], file_xyz[i][1], file_xyz[i][2])) continue;
++      int taken = 0;
++      for (int j = 0; j < nocc; j++) {
++        double dx = file_xyz[i][0] - occall[4 * j];
++        double dy = file_xyz[i][1] - occall[4 * j + 1];
++        double dz = file_xyz[i][2] - occall[4 * j + 2];
++        if (dx * dx + dy * dy + dz * dz < occepssq) {
++          taken = 1;
++          break;
++        }
++      }
++      if (!taken) catalog_append(file_xyz[i], 1.0e30, 0);
++    }
++  }
++
++  // occupied entries appended after the empties
++
++  for (int i = 0; i < nocc; i++) {
++    double *xyz = &occall[4 * i];
++    tagint t = (tagint) ubuf(occall[4 * i + 3]).i;
++    catalog_append(xyz, 0.0, t);
++  }
++  memory->destroy(occall);
++}
++
++/* ----------------------------------------------------------------------
++   one MC block, following fix gcmc's placement in the timestep
++------------------------------------------------------------------------- */
++
++void FixMCSites::pre_exchange()
++{
++  if (next_reneighbor != update->ntimestep) return;
++
++  // per-block parameter refresh (equal-style variables)
++
++  if (temp_var >= 0) {
++    temp = input->variable->compute_equal(temp_var);
++    if (temp <= 0.0)
++      error->all(FLERR, "Fix mc/sites temperature variable gave {}, must be > 0.0", temp);
++  }
++  if (mu_var >= 0) mu = input->variable->compute_equal(mu_var);
++  beta = 1.0 / (force->boltz * temp);
++  sigma = sqrt(force->boltz * temp * tfac_insert / gas_mass / force->mvv2e);
++
++  if (triclinic) {
++    sublo = domain->sublo_lamda;
++    subhi = domain->subhi_lamda;
++  } else {
++    sublo = domain->sublo;
++    subhi = domain->subhi;
++  }
++
++  // re-home atoms, rebuild ghosts and neighbor lists
++
++  if (triclinic) domain->x2lamda(atom->nlocal);
++  domain->pbc();
++  comm->exchange();
++  atom->nghost = 0;
++  comm->borders();
++  if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
++  if (modify->n_pre_neighbor) modify->pre_neighbor();
++  neighbor->build(1);
++
++  build_catalog();
++
++  if (ncatalog == 0) {
++    if (comm->me == 0)
++      error->warning(FLERR, "Fix mc/sites {}: empty site catalogue, no MC moves attempted", id);
++    next_reneighbor = update->ntimestep + mcs_nevery;
++    return;
++  }
++
++  // activate the GRACE energy-only signature for the whole MC block
++
++  if (grace_energy_only) *grace_energy_only = 1;
++
++  energy_stored = energy_full();
++
++  double attempts_before = nattempts;
++  double accepted_before = ninsert_acc + ndelete_acc;
++
++  if (mode == MODE_GC) {
++    for (int itrial = 0; itrial < ntrials; itrial++) {
++      int idx = (int) (random_equal->uniform() * ncatalog);
++      if (idx >= ncatalog) idx = ncatalog - 1;
++      if (catalog[idx].tag == 0)
++        attempt_insertion(idx);
++      else
++        attempt_deletion(idx);
++    }
++  } else
++    run_source_mode();
++
++  if (grace_energy_only) *grace_energy_only = 0;
++
++  // final re-home so the integrator continues from a consistent state
++
++  if (triclinic) domain->x2lamda(atom->nlocal);
++  domain->pbc();
++  comm->exchange();
++  atom->nghost = 0;
++  comm->borders();
++  if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
++
++  // block bookkeeping for the output vector + acceptance-ratio warning
++
++  bigint nocc = 0;
++  for (int i = 0; i < ncatalog; i++)
++    if (catalog[i].tag != 0) nocc++;
++  nspecies_out = (double) nocc;
++  ncatalog_out = (double) ncatalog;
++
++  double block_attempts = nattempts - attempts_before;
++  if (mode == MODE_GC && block_attempts > 0.0) {
++    double ratio = (ninsert_acc + ndelete_acc - accepted_before) / block_attempts;
++    if (ratio < 0.01 || ratio > 0.99)
++      nblocks_offband++;
++    else
++      nblocks_offband = 0;
++    if (nblocks_offband == OFFBAND_WARN_BLOCKS && comm->me == 0)
++      error->warning(FLERR,
++                     "Fix mc/sites {}: acceptance ratio {:.4} outside [0.01,0.99] for {} "
++                     "consecutive blocks",
++                     id, ratio, OFFBAND_WARN_BLOCKS);
++  }
++
++  next_reneighbor = update->ntimestep + mcs_nevery;
++}
++
++/* ----------------------------------------------------------------------
++   which rank owns a position: remap into the box, test the subdomain
++   (fix gcmc pattern); returns 1 on exactly one rank
++------------------------------------------------------------------------- */
++
++int FixMCSites::site_owner_flag(double *coord)
++{
++  domain->remap(coord);
++  if (triclinic) {
++    double lamda[3];
++    domain->x2lamda(coord, lamda);
++    return (lamda[0] >= sublo[0] && lamda[0] < subhi[0] && lamda[1] >= sublo[1] &&
++            lamda[1] < subhi[1] && lamda[2] >= sublo[2] && lamda[2] < subhi[2]);
++  }
++  return (coord[0] >= sublo[0] && coord[0] < subhi[0] && coord[1] >= sublo[1] &&
++          coord[1] < subhi[1] && coord[2] >= sublo[2] && coord[2] < subhi[2]);
++}
++
++/* ----------------------------------------------------------------------
++   tag of the atom just created via tag_extend, identical on all ranks
++------------------------------------------------------------------------- */
++
++tagint FixMCSites::global_new_tag(int proc_flag)
++{
++  tagint newtag = 0;
++  if (proc_flag) newtag = atom->tag[atom->nlocal - 1];
++  tagint newtag_all;
++  MPI_Allreduce(&newtag, &newtag_all, 1, MPI_LMP_TAGINT, MPI_MAX, world);
++  return newtag_all;
++}
++
++/* ----------------------------------------------------------------------
++   trial insertion at empty catalogue entry idx
++   acceptance: min(1, exp(-beta*(dU - mu)))  [lattice-gas convention]
++------------------------------------------------------------------------- */
++
++void FixMCSites::attempt_insertion(int idx)
++{
++  nattempts += 1.0;
++
++  if (maxspecies >= 0) {
++    bigint nocc = 0;
++    for (int i = 0; i < ncatalog; i++)
++      if (catalog[i].tag != 0) nocc++;
++    if (nocc >= maxspecies) return;
++  }
++
++  // overlap pre-rejection: no energy evaluation for hopeless insertions
++
++  if (overlap_cutoff > 0.0 && catalog[idx].clearance < overlap_cutoff) return;
++
++  double energy_before = energy_stored;
++  double coord[3] = {catalog[idx].x[0], catalog[idx].x[1], catalog[idx].x[2]};
++  int proc_flag = site_owner_flag(coord);
++
++  if (proc_flag) {
++    atom->avec->create_atom(mcs_type, coord);
++    int m = atom->nlocal - 1;
++    atom->mask[m] = groupbitall;
++    atom->v[m][0] = random_unequal->gaussian() * sigma;
++    atom->v[m][1] = random_unequal->gaussian() * sigma;
++    atom->v[m][2] = random_unequal->gaussian() * sigma;
++    if (charge_flag) atom->q[m] = charge_val;
++    modify->create_attribute(m);
++  }
++
++  atom->natoms++;
++  atom->tag_extend();
++  atom->map_init();
++  atom->nghost = 0;
++  if (triclinic) domain->x2lamda(atom->nlocal);
++  comm->borders();
++  if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
++  if (force->kspace) force->kspace->qsum_qsq();
++  if (force->pair->tail_flag) force->pair->reinit();
++
++  tagint newtag = global_new_tag(proc_flag);
++
++  double energy_after = energy_full();
++
++  if (energy_after < MAXENERGYTEST &&
++      random_equal->uniform() < exp(-beta * (energy_after - energy_before - mu))) {
++    ninsert_acc += 1.0;
++    energy_stored = energy_after;
++    catalog[idx].tag = newtag;
++  } else {
++    atom->natoms--;
++    if (proc_flag) atom->nlocal--;
++    if (force->kspace) force->kspace->qsum_qsq();
++    if (force->pair->tail_flag) force->pair->reinit();
++    energy_stored = energy_before;
++  }
++}
++
++/* ----------------------------------------------------------------------
++   trial deletion of the atom at occupied catalogue entry idx
++   acceptance: min(1, exp(-beta*(dU + mu)))  [lattice-gas convention]
++
++   unlike fix gcmc (exclusion-group masking, which leaves the isolated-atom
++   energy in the total -- wrong for ML potentials) the atom is really
++   removed for the trial and restored exactly via pack/unpack_exchange on
++   rejection (QUESTIONS.md Q4)
++------------------------------------------------------------------------- */
++
++void FixMCSites::attempt_deletion(int idx)
++{
++  nattempts += 1.0;
++
++  double energy_before = energy_stored;
++  tagint dtag = catalog[idx].tag;
++  int m = atom->map(dtag);
++  int proc_flag = (m >= 0 && m < atom->nlocal);
++
++  if (proc_flag) {
++    // buffer sized like Comm::init_exchange: avec extra + fix extras + slack
++    // (the base per-atom pack of ~11 doubles is well inside the slack)
++    int needed = atom->avec->maxexchange + 1024;
++    for (const auto &ifix : modify->get_fix_list()) needed += ifix->maxexchange;
++    if (exchbufsize < needed) {
++      memory->destroy(exchbuf);
++      exchbufsize = needed;
++      memory->create(exchbuf, exchbufsize, "mc/sites:exchbuf");
++    }
++    atom->avec->pack_exchange(m, exchbuf);
++    atom->avec->copy(atom->nlocal - 1, m, 1);
++    atom->nlocal--;
++  }
++  atom->natoms--;
++  atom->map_init();
++  atom->nghost = 0;
++  if (triclinic) domain->x2lamda(atom->nlocal);
++  comm->borders();
++  if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
++  if (force->kspace) force->kspace->qsum_qsq();
++  if (force->pair->tail_flag) force->pair->reinit();
++
++  double energy_after = energy_full();
++
++  if (random_equal->uniform() < exp(-beta * (energy_after - energy_before + mu))) {
++    ndelete_acc += 1.0;
++    energy_stored = energy_after;
++    // entry stays in the catalogue as empty at the deleted atom's position:
++    // the reverse move exists within the frozen block
++    catalog[idx].tag = 0;
++  } else {
++    if (proc_flag) atom->avec->unpack_exchange(exchbuf);    // increments nlocal
++    atom->natoms++;
++    atom->map_init();
++    atom->nghost = 0;
++    if (triclinic) domain->x2lamda(atom->nlocal);
++    comm->borders();
++    if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
++    if (force->kspace) force->kspace->qsum_qsq();
++    if (force->pair->tail_flag) force->pair->reinit();
++    energy_stored = energy_before;
++  }
++}
++
++/* ----------------------------------------------------------------------
++   source mode: insert `rate` atoms per invocation at distinct random
++   empty entries, unconditionally (irradiation-style); entries failing the
++   overlap guard are skipped and counted
++------------------------------------------------------------------------- */
++
++void FixMCSites::run_source_mode()
++{
++  int ninserted = 0;
++  int nempty = 0;
++  for (int i = 0; i < ncatalog; i++)
++    if (catalog[i].tag == 0) nempty++;
++
++  while (ninserted < rate) {
++    if (nempty == 0) {
++      nsource_skip += rate - ninserted;
++      if (comm->me == 0)
++        error->warning(FLERR, "Fix mc/sites {}: site catalogue exhausted in source mode ({} "
++                              "insertions skipped)",
++                       id, rate - ninserted);
++      break;
++    }
++
++    // pick uniformly among the current empty entries (synchronized draw)
++
++    int which = (int) (random_equal->uniform() * nempty);
++    if (which >= nempty) which = nempty - 1;
++    int idx = -1;
++    for (int i = 0, k = 0; i < ncatalog; i++) {
++      if (catalog[i].tag == 0) {
++        if (k == which) {
++          idx = i;
++          break;
++        }
++        k++;
++      }
++    }
++
++    nattempts += 1.0;
++    nempty--;    // this entry is used up either way (distinct entries)
++
++    if (overlap_cutoff > 0.0 && catalog[idx].clearance < overlap_cutoff) {
++      nsource_skip += 1.0;
++      catalog[idx].tag = -1;    // mark consumed but not occupied
++      continue;
++    }
++
++    double coord[3] = {catalog[idx].x[0], catalog[idx].x[1], catalog[idx].x[2]};
++    int proc_flag = site_owner_flag(coord);
++
++    if (proc_flag) {
++      atom->avec->create_atom(mcs_type, coord);
++      int m = atom->nlocal - 1;
++      atom->mask[m] = groupbitall;
++      atom->v[m][0] = random_unequal->gaussian() * sigma;
++      atom->v[m][1] = random_unequal->gaussian() * sigma;
++      atom->v[m][2] = random_unequal->gaussian() * sigma;
++      if (charge_flag) atom->q[m] = charge_val;
++      modify->create_attribute(m);
++    }
++
++    atom->natoms++;
++    atom->tag_extend();
++    atom->map_init();
++    atom->nghost = 0;
++    if (triclinic) domain->x2lamda(atom->nlocal);
++    comm->borders();
++    if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
++    if (force->kspace) force->kspace->qsum_qsq();
++    if (force->pair->tail_flag) force->pair->reinit();
++
++    catalog[idx].tag = global_new_tag(proc_flag);
++    ninsert_acc += 1.0;
++    ninserted++;
++  }
++
++  // restore "consumed" markers to empty for the occupancy count
++
++  for (int i = 0; i < ncatalog; i++)
++    if (catalog[i].tag == -1) catalog[i].tag = 0;
++}
++
++/* ----------------------------------------------------------------------
++   current total potential energy, identical on all ranks
++   (fix gcmc energy_full pattern; forces are computed and discarded unless
++   the pair style honors the energy-only hint / GRACE flag)
++------------------------------------------------------------------------- */
++
++double FixMCSites::energy_full()
++{
++  if (triclinic) domain->x2lamda(atom->nlocal);
++  domain->pbc();
++  comm->exchange();
++  atom->nghost = 0;
++  comm->borders();
++  if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
++  if (modify->n_pre_neighbor) modify->pre_neighbor();
++  neighbor->build(1);
++
++  int eflag = ENERGY_GLOBAL | ENERGY_ONLY_HINT;
++  int vflag = 0;
++
++  // zero forces: they accumulate across repeated evaluations in one step
++
++  size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
++  if (nbytes) memset(&atom->f[0][0], 0, 3 * nbytes);
++
++  if (modify->n_pre_force) modify->pre_force(vflag);
++  if (force->pair) force->pair->compute(eflag, vflag);
++  if (atom->molecular != Atom::ATOMIC) {
++    if (force->bond) force->bond->compute(eflag, vflag);
++    if (force->angle) force->angle->compute(eflag, vflag);
++    if (force->dihedral) force->dihedral->compute(eflag, vflag);
++    if (force->improper) force->improper->compute(eflag, vflag);
++  }
++  if (force->kspace) force->kspace->compute(eflag, vflag);
++  if (modify->n_post_force_any) modify->post_force(vflag);
++
++  update->eflag_global = update->ntimestep;
++  return c_pe->compute_scalar();
++}
++
++/* ---------------------------------------------------------------------- */
++
++double FixMCSites::compute_vector(int n)
++{
++  switch (n) {
++    case 0:
++      return nattempts;
++    case 1:
++      return ninsert_acc;
++    case 2:
++      return ndelete_acc;
++    case 3:
++      return nspecies_out;
++    case 4:
++      return ncatalog_out;
++    case 5:
++      return (ncatalog_out > 0.0) ? nspecies_out / ncatalog_out : 0.0;
++    case 6:
++      return (nattempts > 0.0) ? (ninsert_acc + ndelete_acc) / nattempts : 0.0;
++    case 7:
++      return nsource_skip;
++  }
++  return 0.0;
++}
++
++/* ----------------------------------------------------------------------
++   pack RNG states + counters into restart file (fix gcmc pattern)
++------------------------------------------------------------------------- */
++
++void FixMCSites::write_restart(FILE *fp)
++{
++  int n = 0;
++  double list[9];
++  list[n++] = random_equal->state();
++  list[n++] = random_unequal->state();
++  list[n++] = ubuf(next_reneighbor).d;
++  list[n++] = nattempts;
++  list[n++] = ninsert_acc;
++  list[n++] = ndelete_acc;
++  list[n++] = nsource_skip;
++  list[n++] = ubuf(update->ntimestep).d;
++  list[n++] = 0.0;    // reserved
++
++  if (comm->me == 0) {
++    int size = n * sizeof(double);
++    fwrite(&size, sizeof(int), 1, fp);
++    fwrite(list, sizeof(double), n, fp);
++  }
++}
++
++/* ---------------------------------------------------------------------- */
++
++void FixMCSites::restart(char *buf)
++{
++  int n = 0;
++  auto list = (double *) buf;
++
++  seed = (int) list[n++];
++  random_equal->reset(seed);
++  seed = (int) list[n++];
++  random_unequal->reset(seed);
++  next_reneighbor = (bigint) ubuf(list[n++]).i;
++  nattempts = list[n++];
++  ninsert_acc = list[n++];
++  ndelete_acc = list[n++];
++  nsource_skip = list[n++];
++
++  bigint ntimestep_restart = (bigint) ubuf(list[n++]).i;
++  if (ntimestep_restart != update->ntimestep)
++    error->all(FLERR, "Must not reset timestep when restarting fix mc/sites");
++}
++
++/* ---------------------------------------------------------------------- */
++
++double FixMCSites::memory_usage()
++{
++  double bytes = (double) maxcatalog * sizeof(SiteEntry);
++  bytes += (double) exchbufsize * sizeof(double);
++  bytes += (double) nfile_sites * 3 * sizeof(double);
++  return bytes;
++}
+diff --git a/src/MC/fix_mc_sites.h b/src/MC/fix_mc_sites.h
+new file mode 100644
+index 0000000..67f763d
+--- /dev/null
++++ b/src/MC/fix_mc_sites.h
+@@ -0,0 +1,112 @@
++/* -*- c++ -*- ----------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++#ifdef FIX_CLASS
++// clang-format off
++FixStyle(mc/sites,FixMCSites);
++// clang-format on
++#else
++
++#ifndef LMP_FIX_MC_SITES_H
++#define LMP_FIX_MC_SITES_H
++
++#include "fix.h"
++
++namespace LAMMPS_NS {
++
++class FixMCSites : public Fix {
++ public:
++  FixMCSites(class LAMMPS *, int, char **);
++  ~FixMCSites() override;
++  int setmask() override;
++  void init() override;
++  void pre_exchange() override;
++  double compute_vector(int) override;
++  void write_restart(FILE *) override;
++  void restart(char *) override;
++  double memory_usage() override;
++
++  int species_type() const { return mcs_type; }
++
++ private:
++  // one frozen-catalogue entry: empty site (tag 0) or species atom (tag > 0)
++  struct SiteEntry {
++    double x[3];
++    double clearance;
++    tagint tag;
++  };
++
++  int mcs_nevery;          // MD steps between MC blocks
++  int ntrials;             // trial flips per block
++  int mcs_type;            // atom type of the MC species
++  int seed;                // RNG seed
++  double temp;             // MC temperature
++  char *temp_var_name;     // equal-style variable for temp (or null)
++  int temp_var;
++  int mode;                // MODE_GC or MODE_SOURCE
++  double mu;               // lattice-gas chemical potential (gc mode)
++  char *mu_var_name;       // equal-style variable for mu (or null)
++  int mu_var;
++  int rate;                // insertions per invocation (source mode)
++  double tfac_insert;      // inserted-atom velocity temperature scale
++  double charge_val;       // charge assigned to inserted atoms
++  int charge_flag;
++  bigint maxspecies;       // cap on N_species (insertions skipped above)
++  double overlap_cutoff;   // pre-reject insertions at clearance below this
++
++  char *idsites_compute;    // sites compute ID (dynamic catalogue) or null
++  class Compute *sites_compute;
++  char *sites_file;         // static site-list file (validation mode) or null
++  int nfile_sites;          // rows in the file list
++  double **file_xyz;        // file site positions (wrapped into the box)
++
++  char *idregion;
++  class Region *region;
++
++  class RanPark *random_equal;      // identical stream on all ranks
++  class RanPark *random_unequal;    // owner-only draws (velocities)
++  class Compute *c_pe;
++  int *grace_energy_only;           // GRACE extract hook (or null)
++
++  double beta, sigma, gas_mass;
++  double energy_stored;
++  int triclinic;
++  double *sublo, *subhi;
++  int groupbitall;
++
++  double *exchbuf;      // pack_exchange buffer for deletion-trial restore
++  int exchbufsize;
++
++  SiteEntry *catalog;    // frozen per-block catalogue, replicated on all ranks
++  int ncatalog, maxcatalog;
++
++  // counters / output vector state
++  double nattempts, ninsert_acc, ndelete_acc, nsource_skip;
++  double nspecies_out, ncatalog_out;
++  int nblocks_offband;    // consecutive blocks with acceptance out of [0.01,0.99]
++
++  void build_catalog();
++  void catalog_append(const double *xyz, double clearance, tagint tag);
++  void read_sites_file();
++  void attempt_insertion(int);
++  void attempt_deletion(int);
++  void run_source_mode();
++  double energy_full();
++  int site_owner_flag(double *);
++  tagint global_new_tag(int);
++};
++
++}    // namespace LAMMPS_NS
++
++#endif
++#endif
+-- 
+2.54.0
+
