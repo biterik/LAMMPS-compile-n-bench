@@ -1,0 +1,32 @@
+From f530d7cc6b921ef2e73a6dc05fadfa25856b5822 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Mon, 13 Jul 2026 12:30:05 +0200
+Subject: [PATCH 5/5] fix mc/sites: seed velocity RNG per rank for independent
+ inserted-atom velocities
+
+---
+ src/MC/fix_mc_sites.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/MC/fix_mc_sites.cpp b/src/MC/fix_mc_sites.cpp
+index eb0bc8c..150d0cd 100644
+--- a/src/MC/fix_mc_sites.cpp
++++ b/src/MC/fix_mc_sites.cpp
+@@ -191,8 +191,13 @@ FixMCSites::FixMCSites(LAMMPS *lmp, int narg, char **arg) :
+   extvector = 0;
+   restart_global = 1;
+ 
++  // random_equal drives the proposal draw (which catalogue entry) and the
++  // acceptance test; it must be identical on every rank so all ranks agree on
++  // each move.  random_unequal draws only the inserted-atom velocities on the
++  // owning rank, so it is offset by rank: otherwise different ranks would draw
++  // identical Maxwell-Boltzmann velocities for their first insertions.
+   random_equal = new RanPark(lmp, seed);
+-  random_unequal = new RanPark(lmp, seed);
++  random_unequal = new RanPark(lmp, seed + comm->me);
+ 
+   force_reneighbor = 1;
+   next_reneighbor = update->ntimestep + 1;
+-- 
+2.54.0
+

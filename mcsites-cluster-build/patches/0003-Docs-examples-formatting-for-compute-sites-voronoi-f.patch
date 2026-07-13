@@ -1,0 +1,1244 @@
+From a72336d3fa9e1f2b4bf9306de0d6d8c9db49e296 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Tue, 7 Jul 2026 22:11:51 +0200
+Subject: [PATCH 3/5] Docs, examples, formatting for compute sites/voronoi +
+ fix mc/sites
+
+- doc/src pages for both styles + command-table/list registration
+- examples/PACKAGES/mc_sites (langmuir + dynamic hybrid MD/MC, <1s,
+  serial + 4-rank reference logs)
+- clang-format (LAMMPS config) applied to all four new source files
+- src/.gitignore entries for make-based package installs
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01E5m4kr1kzqsqfBYcMWckk7
+---
+ doc/src/Commands_compute.rst                  |   1 +
+ doc/src/Commands_fix.rst                      |   1 +
+ doc/src/compute.rst                           |   1 +
+ doc/src/compute_sites_voronoi.rst             | 150 +++++++++++++
+ doc/src/fix.rst                               |   1 +
+ doc/src/fix_mc_sites.rst                      | 204 ++++++++++++++++++
+ .../PACKAGES/mc_sites/in.mc_sites.dynamic     |  34 +++
+ .../PACKAGES/mc_sites/in.mc_sites.langmuir    |  27 +++
+ ...og.11Feb2026.mc_sites.dynamic.appleclang.1 |  94 ++++++++
+ ...og.11Feb2026.mc_sites.dynamic.appleclang.4 |  94 ++++++++
+ ...g.11Feb2026.mc_sites.langmuir.appleclang.1 |  90 ++++++++
+ ...g.11Feb2026.mc_sites.langmuir.appleclang.4 |  90 ++++++++
+ src/.gitignore                                |   4 +
+ src/MC/fix_mc_sites.cpp                       |  36 ++--
+ src/MC/fix_mc_sites.h                         |  38 ++--
+ src/VORONOI/compute_sites_voronoi.cpp         |  28 ++-
+ src/VORONOI/compute_sites_voronoi.h           |  28 +--
+ 17 files changed, 853 insertions(+), 68 deletions(-)
+ create mode 100644 doc/src/compute_sites_voronoi.rst
+ create mode 100644 doc/src/fix_mc_sites.rst
+ create mode 100644 examples/PACKAGES/mc_sites/in.mc_sites.dynamic
+ create mode 100644 examples/PACKAGES/mc_sites/in.mc_sites.langmuir
+ create mode 100644 examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.1
+ create mode 100644 examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.4
+ create mode 100644 examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.1
+ create mode 100644 examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.4
+
+diff --git a/doc/src/Commands_compute.rst b/doc/src/Commands_compute.rst
+index 35048ea..1a133df 100644
+--- a/doc/src/Commands_compute.rst
++++ b/doc/src/Commands_compute.rst
+@@ -117,6 +117,7 @@ KOKKOS, o = OPENMP, t = OPT.
+    * :doc:`rheo/property/atom <compute_rheo_property_atom>`
+    * :doc:`rigid/local <compute_rigid_local>`
+    * :doc:`saed <compute_saed>`
++   * :doc:`sites/voronoi <compute_sites_voronoi>`
+    * :doc:`slcsa/atom <compute_slcsa_atom>`
+    * :doc:`slice <compute_slice>`
+    * :doc:`smd/contact/radius <compute_smd_contact_radius>`
+diff --git a/doc/src/Commands_fix.rst b/doc/src/Commands_fix.rst
+index 93efd36..46650b0 100644
+--- a/doc/src/Commands_fix.rst
++++ b/doc/src/Commands_fix.rst
+@@ -112,6 +112,7 @@ OPT.
+    * :doc:`lb/viscous <fix_lb_viscous>`
+    * :doc:`lineforce <fix_lineforce>`
+    * :doc:`manifoldforce <fix_manifoldforce>`
++   * :doc:`mc/sites <fix_mc_sites>`
+    * :doc:`mdi/qm <fix_mdi_qm>`
+    * :doc:`mdi/qmmm <fix_mdi_qmmm>`
+    * :doc:`meso/move <fix_meso_move>`
+diff --git a/doc/src/compute.rst b/doc/src/compute.rst
+index 18e6be7..5b35646 100644
+--- a/doc/src/compute.rst
++++ b/doc/src/compute.rst
+@@ -295,6 +295,7 @@ The individual style names on the :doc:`Commands compute <Commands_compute>` pag
+ * :doc:`rheo/property/atom <compute_rheo_property_atom>` - convert atom attributes in RHEO package to per-atom vectors/arrays
+ * :doc:`rigid/local <compute_rigid_local>` - extract rigid body attributes
+ * :doc:`saed <compute_saed>` - electron diffraction intensity on a mesh of reciprocal lattice nodes
++* :doc:`sites/voronoi <compute_sites_voronoi>` - interstitial site catalogue from Voronoi tessellation vertices
+ * :doc:`slcsa/atom <compute_slcsa_atom>` - perform Supervised Learning Crystal Structure Analysis (SL-CSA)
+ * :doc:`slice <compute_slice>` - extract values from global vector or array
+ * :doc:`smd/contact/radius <compute_smd_contact_radius>` - contact radius for Smooth Mach Dynamics
+diff --git a/doc/src/compute_sites_voronoi.rst b/doc/src/compute_sites_voronoi.rst
+new file mode 100644
+index 0000000..5799ca4
+--- /dev/null
++++ b/doc/src/compute_sites_voronoi.rst
+@@ -0,0 +1,150 @@
++.. index:: compute sites/voronoi
++
++compute sites/voronoi command
++=============================
++
++Syntax
++""""""
++
++.. code-block:: LAMMPS
++
++   compute ID group-ID sites/voronoi rmerge dist keyword values ...
++
++* ID, group-ID are documented in :doc:`compute <compute>` command
++* sites/voronoi = style name of this compute command
++* rmerge dist = merge Voronoi vertices closer than *dist* (distance units, required)
++* zero or more keyword/value pairs may be appended
++* keyword = *rmin* or *rmax* or *vmin* or *vmax* or *metric* or *region* or *coord* or *hostgroup* or *occcut* or *exclgroup*
++
++  .. parsed-literal::
++
++       *rmin* value = minimum site clearance (distance units, may be an equal-style variable)
++       *rmax* value = maximum site clearance (distance units, may be an equal-style variable)
++       *vmin* value = minimum probe Voronoi volume (volume units, may be an equal-style variable)
++       *vmax* value = maximum probe Voronoi volume (volume units, may be an equal-style variable)
++       *metric* value = *radius* or *volume* = also compute the probe Voronoi volume column
++       *region* value = region-ID = only keep sites inside the region
++       *coord* values = k rcut = only keep sites with at least k *hostgroup* atoms within rcut
++       *hostgroup* value = group-ID = atoms counted by the *coord* criterion (default: the compute group)
++       *occcut* value = dist = drop sites within *dist* of any *exclgroup* atom
++       *exclgroup* value = group-ID = atoms carrying the *occcut* veto
++
++Examples
++""""""""
++
++.. code-block:: LAMMPS
++
++   compute SITES all sites/voronoi rmerge 0.3
++   compute OCT all sites/voronoi rmerge 0.3 rmin 1.6 rmax 2.0
++   compute BULK all sites/voronoi rmerge 0.3 rmin 1.4 coord 6 3.5 hostgroup metal occcut 0.9 exclgroup hydrogen
++
++Description
++"""""""""""
++
++.. versionadded:: TBD
++
++Define a computation that builds a catalogue of *interstitial sites*:
++the vertices of the Voronoi tessellation of the atoms in the compute
++group.  Each Voronoi vertex is the center of a locally largest empty
++sphere; its distance to the nearest atoms (its *clearance*) is by
++construction the insertion clearance available at that point.  Because
++the sites are derived from the current geometry, the catalogue adapts
++to any structure: perfect crystals, defects, voids, gas bubbles, and
++surfaces, with no assumed sublattice.
++
++The per-processor tessellation uses the Voro++ library exactly like
++:doc:`compute voronoi/atom <compute_voronoi_atom>` (each processor
++tessellates its subdomain extended by the ghost communication cutoff).
++Vertices are then merged by single-linkage clustering with cutoff
++*rmerge*: clusters are replaced by their centroid and the cluster
++clearance is the minimum over its members.  Merging is required because
++Voronoi vertices of high-symmetry lattices are degenerate and split
++into near-coincident vertices by floating-point noise or thermal
++displacements.  *rmerge* should be much smaller than the distance
++between distinct sites (0.3 Angstroms works well for metals).
++
++The merged sites are then filtered.  A site is kept only if it passes
++all active criteria:
++
++* its clearance lies in [*rmin*, *rmax*]
++* its probe Voronoi volume lies in [*vmin*, *vmax*] (only if the
++  volume metric is active; the probe volume is the volume of the
++  Voronoi cell a test point at the site position would have among the
++  existing atoms, computed by a local re-tessellation; this matches
++  the volume-based site classification of :ref:`(vonPezold) <vonPezold1>`)
++* it lies inside *region* (evaluated at build time only)
++* at least *k* atoms of the *hostgroup* lie within *rcut* of it
++  (*coord* criterion).  This distinguishes internal voids and
++  subsurface sites from outer vacuum: vertices generated in vacuum
++  regions of non-periodic boxes have large clearance but low
++  coordination.
++* no atom of *exclgroup* lies within *occcut* of it.  This is the
++  intended way to suppress candidate sites that are already occupied
++  by an existing (e.g. Monte Carlo) species when the tessellation
++  alone does not remove them.
++
++The *rmin*, *rmax*, *vmin*, and *vmax* thresholds may be specified as
++equal-style variables (e.g. ``v_myrmin``), re-evaluated at every
++invocation, so the filter window may be time-dependent.
++
++The compute is intended as the dynamic site source for
++:doc:`fix mc/sites <fix_mc_sites>`, which re-invokes it at every MC
++block, but it can be used standalone (e.g. dumped with
++:doc:`dump local <dump>`) to analyze interstitial-site distributions.
++
++.. note::
++
++   Each processor only keeps sites whose merged position falls inside
++   its own subdomain, so the union over processors is a duplicate-free
++   global catalogue.  The tessellation around a site is only complete
++   if its clearance is smaller than the ghost-atom communication
++   cutoff; a warning is printed when an accepted site violates this.
++   Increase the communication cutoff via :doc:`comm_modify <comm_modify>`
++   or tighten *rmax* in that case.  In non-periodic directions the
++   tessellation is clamped at the box boundary (like
++   :doc:`compute voronoi/atom <compute_voronoi_atom>`); use the *coord*
++   criterion to exclude the resulting vacuum vertices.
++
++Output info
++"""""""""""
++
++This compute calculates a local array with one row per accepted site
++owned by this processor.  The number of columns is 5, or 6 if the
++volume metric is active: x, y, z, clearance, [volume,] coordination
++(the *coord* atom count, 0 if *coord* is not used).  It also calculates
++a global scalar, the total number of accepted sites across all
++processors.  The scalar is intensive.
++
++The local array can be accessed by any command that uses local values
++from a compute as input, e.g. :doc:`dump local <dump>` or
++:doc:`fix ave/histo <fix_ave_histo>`.  Positions are in distance
++:doc:`units <units>`, the clearance in distance units, the volume in
++volume units.
++
++Restrictions
++""""""""""""
++
++This compute is part of the VORONOI package.  It is only enabled if
++LAMMPS was built with that package.  See the
++:doc:`Build package <Build_package>` page for more info.  It requires
++a 3d simulation.
++
++Related commands
++""""""""""""""""
++
++:doc:`fix mc/sites <fix_mc_sites>`,
++:doc:`compute voronoi/atom <compute_voronoi_atom>`
++
++Default
++"""""""
++
++No clearance/volume window, no region, no coordination criterion, no
++occupancy veto; *hostgroup* = the compute group; only the clearance
++metric is computed.
++
++----------
++
++.. _vonPezold1:
++
++**(vonPezold)** von Pezold, Lymperakis, Neugebauer, Acta Materialia 59,
++2969 (2011).
+diff --git a/doc/src/fix.rst b/doc/src/fix.rst
+index 04b5543..bee4703 100644
+--- a/doc/src/fix.rst
++++ b/doc/src/fix.rst
+@@ -291,6 +291,7 @@ accelerated styles exist.
+ * :doc:`lineforce <fix_lineforce>` - constrain atoms to move in a line
+ * :doc:`lambda_thermostat/apip <fix_lambda_thermostat_apip>` - apply energy conserving correction for an :doc:`APIP potential <Howto_apip>`
+ * :doc:`manifoldforce <fix_manifoldforce>` - restrain atoms to a manifold during minimization
++* :doc:`mc/sites <fix_mc_sites>` - lattice-gas Monte Carlo on a dynamic catalogue of interstitial sites
+ * :doc:`mdi/qm <fix_mdi_qm>` - LAMMPS operates as a client for a quantum code via the MolSSI Driver Interface (MDI)
+ * :doc:`mdi/qmmm <fix_mdi_qmmm>` - LAMMPS operates as client for QM/MM simulation with a quantum code via the MolSSI Driver Interface (MDI)
+ * :doc:`meso/move <fix_meso_move>` - move mesoscopic SPH/SDPD particles in a prescribed fashion
+diff --git a/doc/src/fix_mc_sites.rst b/doc/src/fix_mc_sites.rst
+new file mode 100644
+index 0000000..6516edc
+--- /dev/null
++++ b/doc/src/fix_mc_sites.rst
+@@ -0,0 +1,204 @@
++.. index:: fix mc/sites
++
++fix mc/sites command
++====================
++
++Syntax
++""""""
++
++.. code-block:: LAMMPS
++
++   fix ID group-ID mc/sites Nevery Ntrials type seed Temp sites source mode modeargs keyword values ...
++
++* ID, group-ID are documented in :doc:`fix <fix>` command
++* mc/sites = style name of this fix command
++* Nevery = invoke a Monte Carlo block every this many steps
++* Ntrials = number of trial flips per block (*gc* mode)
++* type = atom type (or type label) of the Monte Carlo species
++* seed = random # seed (positive integer)
++* Temp = Monte Carlo temperature (temperature units, may be an equal-style variable)
++* sites source = *c_ID* or *file path*
++
++  .. parsed-literal::
++
++       *c_ID* = local array of a sites-producing compute (dynamic catalogue,
++                e.g. :doc:`compute sites/voronoi <compute_sites_voronoi>`)
++       *file path* = static site list, one "x y z" triple per line
++                     (validation mode; positions in box distance units)
++
++* mode = *gc* or *source*
++
++  .. parsed-literal::
++
++       *gc* args = *mu* value
++         value = lattice-gas chemical potential (energy units, may be an equal-style variable)
++       *source* args = *rate* value
++         value = number of unconditional insertions per invocation
++
++* zero or more keyword/value pairs may be appended
++* keyword = *region* or *tfac_insert* or *charge* or *maxspecies* or *overlap_cutoff*
++
++  .. parsed-literal::
++
++       *region* value = region-ID = restrict sites and deletable atoms to the region
++       *tfac_insert* value = temperature scale factor for inserted-atom velocities (default 1.0)
++       *charge* value = charge assigned to inserted atoms (charge units)
++       *maxspecies* value = skip insertions above this many species atoms
++       *overlap_cutoff* value = reject insertions at sites with clearance below this
++                                without an energy evaluation (default 0.0 = off)
++
++Examples
++""""""""
++
++.. code-block:: LAMMPS
++
++   compute SITES all sites/voronoi rmerge 0.3 rmin 1.4 rmax 2.5 occcut 0.9 exclgroup hyd
++   fix MC all mc/sites 100 200 2 29494 500.0 sites c_SITES mode gc mu -2.40
++   fix IRR all mc/sites 1000 0 He 74839 300.0 sites c_SITES mode source rate 5
++   fix VAL all mc/sites 1 50 2 12345 300.0 sites file octsites.txt mode gc mu 0.05
++
++Description
++"""""""""""
++
++.. versionadded:: TBD
++
++This fix performs occupancy Monte Carlo of an interstitial species on a
++dynamic, geometry-derived site catalogue, in hybrid MD/MC simulations:
++grand-canonical insertions/deletions (mode *gc*) or fixed-rate
++insertions (mode *source*, irradiation-style) of atoms of the given
++type at the sites provided by a
++:doc:`compute sites/voronoi <compute_sites_voronoi>` (or a static site
++list).  Target applications include hydrogen charging of metals, helium
++bubble growth, and general lattice-gas sampling on sites that follow
++the evolving microstructure.  In contrast to :doc:`fix gcmc <fix_gcmc>`,
++which inserts at random positions in a region, insertions are proposed
++only at geometrically favorable interstitial positions, which raises
++acceptance rates dramatically in condensed phases.
++
++Every *Nevery* steps the fix builds a *frozen catalogue*: the empty
++sites reported by the compute (re-invoked at that step, so the
++catalogue follows the current atomic configuration) or read from the
++file, plus one *occupied* entry for every current atom of the MC
++species in the fix group (and region, if given) -- the species atoms
++themselves are the occupied sites; there is no proximity matching.
++All trials of the block then use only this frozen catalogue.
++
++In *gc* mode, each of the *Ntrials* trials picks one catalogue entry
++uniformly at random.  An empty entry proposes an insertion at its
++position; an occupied entry proposes the deletion of its atom.  The
++acceptance follows the symmetric lattice-gas convention:
++
++.. math::
++
++   P_\text{ins} = \min\left[1, e^{-\beta (\Delta U - \mu)}\right] \qquad
++   P_\text{del} = \min\left[1, e^{-\beta (\Delta U + \mu)}\right]
++
++with :math:`\beta = 1/k_B T` and :math:`\Delta U` the total potential
++energy change of the trial, evaluated by a full energy computation
++(like the *full_energy* option of :doc:`fix gcmc <fix_gcmc>`; this is
++required for EAM, ACE, GRACE, and other many-body potentials).  Note
++that :math:`\mu` uses the fix's own lattice-gas reference: the
++ideal-gas reservoir factors of :doc:`fix gcmc <fix_gcmc>` (thermal
++wavelength, volume, :math:`1/(N+1)`) are intentionally absent, so the
++value of :math:`\mu` differs from fix gcmc's chemical potential by a
++constant that must be calibrated externally when an absolute reference
++is needed.  Isotherm shapes and phase plateaus do not depend on this
++constant.  Within a block, a deletion leaves its entry as empty-at-the-
++deleted-position (so the reverse move exists) and an accepted insertion
++marks its entry occupied; detailed balance is exact within a block, and
++the block-to-block catalogue rebuild is a controlled approximation that
++vanishes on a static lattice.
++
++In *source* mode, each invocation picks *rate* distinct empty entries
++at random and inserts unconditionally (no acceptance test), skipping
++(and counting) sites that fail the *overlap_cutoff* guard or when the
++catalogue is exhausted.
++
++Inserted atoms are assigned to the fix group (and "all"), given
++Maxwell-Boltzmann velocities at *Temp* times *tfac_insert*, and the
++*charge* value if the atom style supports charge.  *Temp* and *mu* may
++be equal-style variables, re-evaluated at every block, enabling e.g.
++simulated annealing of the chemical potential.
++
++Multiple mc/sites fixes may be stacked, one per species (each with its
++own type, mu, and site compute); two instances driving the same atom
++type are rejected.
++
++.. note::
++
++   The MC species atoms must not be time-integrated during the MC
++   block itself (the fix acts at the reneighboring step, before the
++   force computation).  Between blocks, any integrator may act on
++   them, including the host atoms; the catalogue is rebuilt from the
++   current geometry at every block.
++
++.. note::
++
++   The pair styles of the GRACE machine-learning potential family in
++   this LAMMPS distribution expose an energy-only evaluation switch;
++   this fix detects it automatically (via *pair->extract()*) and
++   activates it for the duration of every MC block, which skips the
++   force computation in the TensorFlow graph and substantially reduces
++   the per-trial cost.  For all other pair styles the full-energy
++   evaluation computes (and discards) forces, exactly like
++   :doc:`fix gcmc <fix_gcmc>`.
++
++Restart, fix_modify, output, run start/stop, minimize info
++""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
++
++This fix writes the state of the random number generators and the move
++counters to :doc:`binary restart files <restart>`.  The site catalogue
++itself is derived state and is rebuilt at the first block after a
++restart.
++
++This fix computes a global vector of length 8, accessible by various
++:doc:`output commands <Howto_output>`: (1) trial attempts, (2) accepted
++insertions, (3) accepted deletions, (4) current number of species atoms
++in the catalogue, (5) catalogue size M (empty + occupied), (6)
++instantaneous site concentration = (4)/(5), (7) overall acceptance
++ratio, (8) skipped source-mode insertions.  The vector values are
++intensive.
++
++No global or per-atom quantities are relevant for minimization; this
++fix is not invoked during :doc:`energy minimization <minimize>`.
++
++Restrictions
++""""""""""""
++
++This fix is part of the MC package.  It is only enabled if LAMMPS was
++built with that package.  See the :doc:`Build package <Build_package>`
++page for more info.
++
++Requires a 3d simulation, atom IDs, per-type masses, and reneighboring
++(it cannot be used with *neigh_modify once yes*).  An atom map is
++created automatically if absent.  The species type must have a mass
++even if only inserted atoms carry it.
++
++The static *file* site list assumes the species atoms do not move
++between blocks (validation mode): a file site currently holding a
++species atom is recognized as occupied by exact position match.  With
++moving atoms, use a dynamic compute catalogue and its *occcut* keyword
++instead.
++
++Like fix gcmc's *full_energy* mode, the total energy is recomputed for
++every trial, which is expensive for large systems and dominates the
++cost for machine-learning potentials; choose *Ntrials* and *Nevery*
++accordingly.  The MC part is serial (energy evaluation is parallel).
++Not supported in v1: Kokkos/GPU/INTEL suffix versions, ReaxFF and
++charge-equilibration potentials, core-shell models, molecule insertion,
++2d simulations.  When used with kspace, inserted charges change the
++total system charge; the usual caveats of charged-system Ewald sums
++apply.
++
++Related commands
++""""""""""""""""
++
++:doc:`compute sites/voronoi <compute_sites_voronoi>`,
++:doc:`fix gcmc <fix_gcmc>`, :doc:`fix atom/swap <fix_atom_swap>`,
++:doc:`fix widom <fix_widom>`
++
++Default
++"""""""
++
++tfac_insert = 1.0; no charge assignment; no region; no maxspecies cap;
++overlap_cutoff = 0.0 (off).
+diff --git a/examples/PACKAGES/mc_sites/in.mc_sites.dynamic b/examples/PACKAGES/mc_sites/in.mc_sites.dynamic
+new file mode 100644
+index 0000000..a6f5a61
+--- /dev/null
++++ b/examples/PACKAGES/mc_sites/in.mc_sites.dynamic
+@@ -0,0 +1,34 @@
++# fix mc/sites: hybrid MD/MC with a dynamic site catalogue
++# lj/cut fcc host thermostatted at 30 K; every 10 MD steps one MC block of
++# 20 grand-canonical trial flips runs on the current Voronoi-vertex site
++# catalogue (octahedral window rmin 1.55 - 2.1); the catalogue follows the
++# thermal displacements of the host
++
++units           metal
++boundary        p p p
++atom_style      atomic
++
++lattice         fcc 3.52
++region          box block 0 2 0 2 0 2
++create_box      2 box
++create_atoms    1 box
++mass            1 58.69
++mass            2 1.008
++
++pair_style      lj/cut 5.0
++pair_coeff      1 1 0.20 2.30
++pair_coeff      1 2 0.02 1.50
++pair_coeff      2 2 0.02 1.00
++
++timestep        0.0005
++velocity        all create 30.0 48291 mom yes rot yes
++
++compute         SITES all sites/voronoi rmerge 0.3 rmin 1.55 rmax 2.1
++
++fix             INT all nvt temp 30.0 30.0 0.05
++fix             MC all mc/sites 10 20 2 62717 300.0 sites c_SITES mode gc mu -0.15
++
++thermo          50
++thermo_style    custom step atoms temp pe f_MC[4] f_MC[5] f_MC[7]
++
++run             500
+diff --git a/examples/PACKAGES/mc_sites/in.mc_sites.langmuir b/examples/PACKAGES/mc_sites/in.mc_sites.langmuir
+new file mode 100644
+index 0000000..ef43c1d
+--- /dev/null
++++ b/examples/PACKAGES/mc_sites/in.mc_sites.langmuir
+@@ -0,0 +1,27 @@
++# fix mc/sites: non-interacting lattice-gas (Langmuir) check
++# fcc host with pair_style zero; the dynamic sites/voronoi catalogue with
++# rmin 1.6 selects the 32 octahedral interstitial sites; at mu = 0 the
++# site occupancy must converge to theta = 0.5 (f_MC[6] column)
++
++units           metal
++boundary        p p p
++atom_style      atomic
++
++lattice         fcc 3.52
++region          box block 0 2 0 2 0 2
++create_box      2 box
++create_atoms    1 box
++mass            1 58.69
++mass            2 1.008
++
++pair_style      zero 4.0
++pair_coeff      * *
++
++compute         SITES all sites/voronoi rmerge 0.3 rmin 1.6 rmax 2.0
++
++fix             MC all mc/sites 1 20 2 29494 300.0 sites c_SITES mode gc mu 0.0
++
++thermo          50
++thermo_style    custom step atoms f_MC[4] f_MC[5] f_MC[6] f_MC[7]
++
++run             500
+diff --git a/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.1 b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.1
+new file mode 100644
+index 0000000..493cb23
+--- /dev/null
++++ b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.1
+@@ -0,0 +1,94 @@
++LAMMPS (11 Feb 2026 - MCnoforce-localE)
++# fix mc/sites: hybrid MD/MC with a dynamic site catalogue
++# lj/cut fcc host thermostatted at 30 K; every 10 MD steps one MC block of
++# 20 grand-canonical trial flips runs on the current Voronoi-vertex site
++# catalogue (octahedral window rmin 1.55 - 2.1); the catalogue follows the
++# thermal displacements of the host
++
++units           metal
++boundary        p p p
++atom_style      atomic
++
++lattice         fcc 3.52
++Lattice spacing in x,y,z = 3.52 3.52 3.52
++region          box block 0 2 0 2 0 2
++create_box      2 box
++Created orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  1 by 1 by 1 MPI processor grid
++create_atoms    1 box
++Created 32 atoms
++  using lattice units in orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  create_atoms CPU = 0.000 seconds
++mass            1 58.69
++mass            2 1.008
++
++pair_style      lj/cut 5.0
++pair_coeff      1 1 0.20 2.30
++pair_coeff      1 2 0.02 1.50
++pair_coeff      2 2 0.02 1.00
++
++timestep        0.0005
++velocity        all create 30.0 48291 mom yes rot yes
++
++compute         SITES all sites/voronoi rmerge 0.3 rmin 1.55 rmax 2.1
++
++fix             INT all nvt temp 30.0 30.0 0.05
++fix             MC all mc/sites 10 20 2 62717 300.0 sites c_SITES mode gc mu -0.15
++
++thermo          50
++thermo_style    custom step atoms temp pe f_MC[4] f_MC[5] f_MC[7]
++
++run             500
++Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
++Neighbor list info ...
++  update: every = 1 steps, delay = 0 steps, check = yes
++  max neighbors/atom: 2000, page size: 100000
++  master list distance cutoff = 7
++  ghost atom cutoff = 7
++  binsize = 3.5, bins = 3 3 3
++  1 neighbor lists, perpetual/occasional/extra = 1 0 0
++  (1) pair lj/cut, perpetual
++      attributes: half, newton on
++      pair build: half/bin/atomonly/newton
++      stencil: half/bin/3d
++      bin: standard
++Per MPI rank memory allocation (min/avg/max) = 3.085 | 3.085 | 3.085 Mbytes
++   Step        Atoms         Temp          PotEng        f_MC[4]        f_MC[5]        f_MC[7]    
++         0          32   30            -50.003429      0              0              0            
++        50          41   60.670785     -50.83406       9              41             0.51         
++       100          38   52.661264     -50.584141      6              33             0.55         
++       150          41   46.878405     -51.014671      9              32             0.55666667   
++       200          36   32.910668     -50.460786      4              35             0.565        
++       250          42   63.746515     -51.092851      10             38             0.532        
++       300          42   49.254701     -51.171434      10             32             0.52666667   
++       350          43   69.678188     -51.207119      11             32             0.53285714   
++       400          41   67.153665     -50.923569      9              28             0.53625      
++       450          42   38.93457      -51.129988      10             33             0.54666667   
++       500          40   32.098737     -50.969114      8              30             0.55         
++Loop time of 0.0914147 on 1 procs for 500 steps with 40 atoms
++
++Performance: 236.286 ns/day, 0.102 hours/ns, 5469.579 timesteps/s, 218.783 katom-step/s
++99.5% CPU use with 1 MPI tasks x no OpenMP threads
++
++MPI task timing breakdown:
++Section |  min time  |  avg time  |  max time  |%varavg| %total
++---------------------------------------------------------------
++Pair    | 0.0029334  | 0.0029334  | 0.0029334  |   0.0 |  3.21
++Neigh   | 0.0010615  | 0.0010615  | 0.0010615  |   0.0 |  1.16
++Comm    | 0.00062968 | 0.00062968 | 0.00062968 |   0.0 |  0.69
++Output  | 2.2627e-05 | 2.2627e-05 | 2.2627e-05 |   0.0 |  0.02
++Modify  | 0.086631   | 0.086631   | 0.086631   |   0.0 | 94.77
++Other   |            | 0.000137   |            |       |  0.15
++
++Nlocal:             40 ave          40 max          40 min
++Histogram: 1 0 0 0 0 0 0 0 0 0
++Nghost:            832 ave         832 max         832 min
++Histogram: 1 0 0 0 0 0 0 0 0 0
++Neighs:           3182 ave        3182 max        3182 min
++Histogram: 1 0 0 0 0 0 0 0 0 0
++
++Total # of neighbors = 3182
++Ave neighs/atom = 79.55
++Neighbor list builds = 1150
++Dangerous builds = 0
++Total wall time: 0:00:00
+diff --git a/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.4 b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.4
+new file mode 100644
+index 0000000..10e24fa
+--- /dev/null
++++ b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.dynamic.appleclang.4
+@@ -0,0 +1,94 @@
++LAMMPS (11 Feb 2026 - MCnoforce-localE)
++# fix mc/sites: hybrid MD/MC with a dynamic site catalogue
++# lj/cut fcc host thermostatted at 30 K; every 10 MD steps one MC block of
++# 20 grand-canonical trial flips runs on the current Voronoi-vertex site
++# catalogue (octahedral window rmin 1.55 - 2.1); the catalogue follows the
++# thermal displacements of the host
++
++units           metal
++boundary        p p p
++atom_style      atomic
++
++lattice         fcc 3.52
++Lattice spacing in x,y,z = 3.52 3.52 3.52
++region          box block 0 2 0 2 0 2
++create_box      2 box
++Created orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  1 by 2 by 2 MPI processor grid
++create_atoms    1 box
++Created 32 atoms
++  using lattice units in orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  create_atoms CPU = 0.000 seconds
++mass            1 58.69
++mass            2 1.008
++
++pair_style      lj/cut 5.0
++pair_coeff      1 1 0.20 2.30
++pair_coeff      1 2 0.02 1.50
++pair_coeff      2 2 0.02 1.00
++
++timestep        0.0005
++velocity        all create 30.0 48291 mom yes rot yes
++
++compute         SITES all sites/voronoi rmerge 0.3 rmin 1.55 rmax 2.1
++
++fix             INT all nvt temp 30.0 30.0 0.05
++fix             MC all mc/sites 10 20 2 62717 300.0 sites c_SITES mode gc mu -0.15
++
++thermo          50
++thermo_style    custom step atoms temp pe f_MC[4] f_MC[5] f_MC[7]
++
++run             500
++Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
++Neighbor list info ...
++  update: every = 1 steps, delay = 0 steps, check = yes
++  max neighbors/atom: 2000, page size: 100000
++  master list distance cutoff = 7
++  ghost atom cutoff = 7
++  binsize = 3.5, bins = 3 3 3
++  1 neighbor lists, perpetual/occasional/extra = 1 0 0
++  (1) pair lj/cut, perpetual
++      attributes: half, newton on
++      pair build: half/bin/atomonly/newton
++      stencil: half/bin/3d
++      bin: standard
++Per MPI rank memory allocation (min/avg/max) = 3.081 | 3.081 | 3.081 Mbytes
++   Step        Atoms         Temp          PotEng        f_MC[4]        f_MC[5]        f_MC[7]    
++         0          32   30            -50.003429      0              0              0            
++        50          41   54.836549     -50.701266      9              43             0.51         
++       100          38   24.878602     -50.566639      6              32             0.55         
++       150          41   42.882808     -51.069424      9              32             0.56333333   
++       200          38   40.003567     -50.639504      6              37             0.575        
++       250          42   63.532907     -51.115105      10             35             0.544        
++       300          42   51.273642     -51.185494      10             33             0.54666667   
++       350          43   79.621179     -51.278095      11             32             0.55         
++       400          41   43.780977     -51.060597      9              27             0.54625      
++       450          41   25.681242     -51.06618       9              32             0.55666667   
++       500          41   33.430088     -51.070602      9              32             0.557        
++Loop time of 0.0732416 on 4 procs for 500 steps with 41 atoms
++
++Performance: 294.914 ns/day, 0.081 hours/ns, 6826.724 timesteps/s, 279.896 katom-step/s
++99.8% CPU use with 4 MPI tasks x no OpenMP threads
++
++MPI task timing breakdown:
++Section |  min time  |  avg time  |  max time  |%varavg| %total
++---------------------------------------------------------------
++Pair    | 0.00077271 | 0.00077862 | 0.00078862 |   0.0 |  1.06
++Neigh   | 0.00029883 | 0.00030577 | 0.00031516 |   0.0 |  0.42
++Comm    | 0.005166   | 0.0051949  | 0.0052092  |   0.0 |  7.09
++Output  | 2.7416e-05 | 2.8251e-05 | 2.9376e-05 |   0.0 |  0.04
++Modify  | 0.066667   | 0.066676   | 0.066685   |   0.0 | 91.04
++Other   |            | 0.0002584  |            |       |  0.35
++
++Nlocal:          10.25 ave          12 max           9 min
++Histogram: 2 0 0 0 0 0 1 0 0 1
++Nghost:         592.25 ave         601 max         581 min
++Histogram: 1 0 0 0 1 0 0 0 1 1
++Neighs:         836.75 ave         958 max         739 min
++Histogram: 1 1 0 0 0 0 1 0 0 1
++
++Total # of neighbors = 3347
++Ave neighs/atom = 81.634146
++Neighbor list builds = 1150
++Dangerous builds = 0
++Total wall time: 0:00:00
+diff --git a/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.1 b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.1
+new file mode 100644
+index 0000000..fd8be7b
+--- /dev/null
++++ b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.1
+@@ -0,0 +1,90 @@
++LAMMPS (11 Feb 2026 - MCnoforce-localE)
++# fix mc/sites: non-interacting lattice-gas (Langmuir) check
++# fcc host with pair_style zero; the dynamic sites/voronoi catalogue with
++# rmin 1.6 selects the 32 octahedral interstitial sites; at mu = 0 the
++# site occupancy must converge to theta = 0.5 (f_MC[6] column)
++
++units           metal
++boundary        p p p
++atom_style      atomic
++
++lattice         fcc 3.52
++Lattice spacing in x,y,z = 3.52 3.52 3.52
++region          box block 0 2 0 2 0 2
++create_box      2 box
++Created orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  1 by 1 by 1 MPI processor grid
++create_atoms    1 box
++Created 32 atoms
++  using lattice units in orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  create_atoms CPU = 0.000 seconds
++mass            1 58.69
++mass            2 1.008
++
++pair_style      zero 4.0
++pair_coeff      * *
++
++compute         SITES all sites/voronoi rmerge 0.3 rmin 1.6 rmax 2.0
++
++fix             MC all mc/sites 1 20 2 29494 300.0 sites c_SITES mode gc mu 0.0
++
++thermo          50
++thermo_style    custom step atoms f_MC[4] f_MC[5] f_MC[6] f_MC[7]
++
++run             500
++WARNING: No fixes with time integration, atoms won't move
++For more information see https://docs.lammps.org/err0028 (src/verlet.cpp:60)
++Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
++Neighbor list info ...
++  update: every = 1 steps, delay = 0 steps, check = yes
++  max neighbors/atom: 2000, page size: 100000
++  master list distance cutoff = 6
++  ghost atom cutoff = 6
++  binsize = 3, bins = 3 3 3
++  1 neighbor lists, perpetual/occasional/extra = 1 0 0
++  (1) pair zero, perpetual
++      attributes: half, newton on
++      pair build: half/bin/atomonly/newton
++      stencil: half/bin/3d
++      bin: standard
++Per MPI rank memory allocation (min/avg/max) = 3.085 | 3.085 | 3.085 Mbytes
++   Step        Atoms       f_MC[4]        f_MC[5]        f_MC[6]        f_MC[7]    
++         0          32   0              0              0              0            
++WARNING: Fix mc/sites MC: acceptance ratio 1 outside [0.01,0.99] for 10 consecutive blocks (src/MC/fix_mc_sites.cpp:619)
++        50          60   28             62             0.4516129      1            
++       100          40   8              15             0.53333333     1            
++       150          56   24             50             0.48           1            
++       200          48   16             30             0.53333333     1            
++       250          54   22             39             0.56410256     1            
++       300          50   18             33             0.54545455     1            
++       350          48   16             38             0.42105263     1            
++       400          50   18             37             0.48648649     1            
++       450          58   26             45             0.57777778     1            
++       500          50   18             32             0.5625         1            
++Loop time of 0.494183 on 1 procs for 500 steps with 50 atoms
++
++Performance: 87.417 ns/day, 0.275 hours/ns, 1011.771 timesteps/s, 50.589 katom-step/s
++99.7% CPU use with 1 MPI tasks x no OpenMP threads
++
++MPI task timing breakdown:
++Section |  min time  |  avg time  |  max time  |%varavg| %total
++---------------------------------------------------------------
++Pair    | 2.7331e-05 | 2.7331e-05 | 2.7331e-05 |   0.0 |  0.01
++Neigh   | 0.013932   | 0.013932   | 0.013932   |   0.0 |  2.82
++Comm    | 0.0020138  | 0.0020138  | 0.0020138  |   0.0 |  0.41
++Output  | 4.9167e-05 | 4.9167e-05 | 4.9167e-05 |   0.0 |  0.01
++Modify  | 0.47794    | 0.47794    | 0.47794    |   0.0 | 96.71
++Other   |            | 0.0002173  |            |       |  0.04
++
++Nlocal:             50 ave          50 max          50 min
++Histogram: 1 0 0 0 0 0 0 0 0 0
++Nghost:            999 ave         999 max         999 min
++Histogram: 1 0 0 0 0 0 0 0 0 0
++Neighs:           3260 ave        3260 max        3260 min
++Histogram: 1 0 0 0 0 0 0 0 0 0
++
++Total # of neighbors = 3260
++Ave neighs/atom = 65.2
++Neighbor list builds = 11500
++Dangerous builds = 0
++Total wall time: 0:00:00
+diff --git a/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.4 b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.4
+new file mode 100644
+index 0000000..d33cab7
+--- /dev/null
++++ b/examples/PACKAGES/mc_sites/log.11Feb2026.mc_sites.langmuir.appleclang.4
+@@ -0,0 +1,90 @@
++LAMMPS (11 Feb 2026 - MCnoforce-localE)
++# fix mc/sites: non-interacting lattice-gas (Langmuir) check
++# fcc host with pair_style zero; the dynamic sites/voronoi catalogue with
++# rmin 1.6 selects the 32 octahedral interstitial sites; at mu = 0 the
++# site occupancy must converge to theta = 0.5 (f_MC[6] column)
++
++units           metal
++boundary        p p p
++atom_style      atomic
++
++lattice         fcc 3.52
++Lattice spacing in x,y,z = 3.52 3.52 3.52
++region          box block 0 2 0 2 0 2
++create_box      2 box
++Created orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  1 by 2 by 2 MPI processor grid
++create_atoms    1 box
++Created 32 atoms
++  using lattice units in orthogonal box = (0 0 0) to (7.04 7.04 7.04)
++  create_atoms CPU = 0.000 seconds
++mass            1 58.69
++mass            2 1.008
++
++pair_style      zero 4.0
++pair_coeff      * *
++
++compute         SITES all sites/voronoi rmerge 0.3 rmin 1.6 rmax 2.0
++
++fix             MC all mc/sites 1 20 2 29494 300.0 sites c_SITES mode gc mu 0.0
++
++thermo          50
++thermo_style    custom step atoms f_MC[4] f_MC[5] f_MC[6] f_MC[7]
++
++run             500
++WARNING: No fixes with time integration, atoms won't move
++For more information see https://docs.lammps.org/err0028 (src/verlet.cpp:60)
++Generated 0 of 1 mixed pair_coeff terms from geometric mixing rule
++Neighbor list info ...
++  update: every = 1 steps, delay = 0 steps, check = yes
++  max neighbors/atom: 2000, page size: 100000
++  master list distance cutoff = 6
++  ghost atom cutoff = 6
++  binsize = 3, bins = 3 3 3
++  1 neighbor lists, perpetual/occasional/extra = 1 0 0
++  (1) pair zero, perpetual
++      attributes: half, newton on
++      pair build: half/bin/atomonly/newton
++      stencil: half/bin/3d
++      bin: standard
++Per MPI rank memory allocation (min/avg/max) = 3.081 | 3.081 | 3.081 Mbytes
++   Step        Atoms       f_MC[4]        f_MC[5]        f_MC[6]        f_MC[7]    
++         0          32   0              0              0              0            
++WARNING: Fix mc/sites MC: acceptance ratio 1 outside [0.01,0.99] for 10 consecutive blocks (src/MC/fix_mc_sites.cpp:619)
++        50          60   28             62             0.4516129      1            
++       100          46   14             22             0.63636364     1            
++       150          54   22             42             0.52380952     1            
++       200          50   18             41             0.43902439     1            
++       250          48   16             37             0.43243243     1            
++       300          50   18             35             0.51428571     1            
++       350          52   20             43             0.46511628     1            
++       400          46   14             38             0.36842105     1            
++       450          58   26             48             0.54166667     1            
++       500          50   18             32             0.5625         1            
++Loop time of 0.421846 on 4 procs for 500 steps with 50 atoms
++
++Performance: 102.407 ns/day, 0.234 hours/ns, 1185.266 timesteps/s, 59.263 katom-step/s
++99.8% CPU use with 4 MPI tasks x no OpenMP threads
++
++MPI task timing breakdown:
++Section |  min time  |  avg time  |  max time  |%varavg| %total
++---------------------------------------------------------------
++Pair    | 1.9701e-05 | 2.0219e-05 | 2.0751e-05 |   0.0 |  0.00
++Neigh   | 0.0034151  | 0.0038775  | 0.0045017  |   0.6 |  0.92
++Comm    | 0.0085749  | 0.0092123  | 0.0096901  |   0.4 |  2.18
++Output  | 3.2499e-05 | 3.4113e-05 | 3.6624e-05 |   0.0 |  0.01
++Modify  | 0.40851    | 0.40856    | 0.40862    |   0.0 | 96.85
++Other   |            | 0.0001372  |            |       |  0.03
++
++Nlocal:           12.5 ave          15 max          10 min
++Histogram: 1 0 0 0 1 0 1 0 0 1
++Nghost:          713.5 ave         746 max         681 min
++Histogram: 2 0 0 0 0 0 0 0 0 2
++Neighs:            819 ave        1058 max         617 min
++Histogram: 1 0 0 1 1 0 0 0 0 1
++
++Total # of neighbors = 3276
++Ave neighs/atom = 65.52
++Neighbor list builds = 11500
++Dangerous builds = 0
++Total wall time: 0:00:00
+diff --git a/src/.gitignore b/src/.gitignore
+index 3fa658b..ce76cff 100644
+--- a/src/.gitignore
++++ b/src/.gitignore
+@@ -749,6 +749,8 @@
+ /compute_reaxff_atom.h
+ /compute_rigid_local.cpp
+ /compute_rigid_local.h
++/compute_sites_voronoi.cpp
++/compute_sites_voronoi.h
+ /compute_slcsa_atom.cpp
+ /compute_slcsa_atom.h
+ /compute_smd_triangle_vertices.cpp
+@@ -947,6 +949,8 @@
+ /fix_freeze.h
+ /fix_gcmc.cpp
+ /fix_gcmc.h
++/fix_mc_sites.cpp
++/fix_mc_sites.h
+ /fix_gjf.cpp
+ /fix_gjf.h
+ /fix_gld.cpp
+diff --git a/src/MC/fix_mc_sites.cpp b/src/MC/fix_mc_sites.cpp
+index 55c79a0..eb0bc8c 100644
+--- a/src/MC/fix_mc_sites.cpp
++++ b/src/MC/fix_mc_sites.cpp
+@@ -32,13 +32,13 @@
+ #include "atom_vec.h"
+ #include "bond.h"
+ #include "comm.h"
+-#include "dihedral.h"
+-#include "improper.h"
+ #include "compute.h"
++#include "dihedral.h"
+ #include "domain.h"
+ #include "error.h"
+ #include "force.h"
+ #include "group.h"
++#include "improper.h"
+ #include "input.h"
+ #include "kspace.h"
+ #include "memory.h"
+@@ -63,7 +63,7 @@ static constexpr int CATDELTA = 4096;              // catalogue grow chunk
+ // numerically equal to upstream force.h ENERGY_ONLY (absent in this fork's
+ // enum); harmless extra eflag bit where unknown, energy-only hint upstream
+ static constexpr int ENERGY_ONLY_HINT = 0x04;
+-static constexpr int OFFBAND_WARN_BLOCKS = 10;     // acceptance-ratio warning patience
++static constexpr int OFFBAND_WARN_BLOCKS = 10;    // acceptance-ratio warning patience
+ 
+ /* ---------------------------------------------------------------------- */
+ 
+@@ -71,8 +71,7 @@ FixMCSites::FixMCSites(LAMMPS *lmp, int narg, char **arg) :
+     Fix(lmp, narg, arg), temp_var_name(nullptr), mu_var_name(nullptr), idsites_compute(nullptr),
+     sites_compute(nullptr), sites_file(nullptr), file_xyz(nullptr), idregion(nullptr),
+     region(nullptr), random_equal(nullptr), random_unequal(nullptr), c_pe(nullptr),
+-    grace_energy_only(nullptr), sublo(nullptr), subhi(nullptr), exchbuf(nullptr),
+-    catalog(nullptr)
++    grace_energy_only(nullptr), sublo(nullptr), subhi(nullptr), exchbuf(nullptr), catalog(nullptr)
+ {
+   if (narg < 8) utils::missing_cmd_args(FLERR, "fix mc/sites", error);
+ 
+@@ -251,8 +250,9 @@ void FixMCSites::init()
+   if (charge_flag && !atom->q_flag)
+     error->all(FLERR, "Fix mc/sites charge keyword requires an atom style with charge");
+   if (neighbor->build_once)
+-    error->all(FLERR, "Cannot use fix mc/sites with neigh_modify once yes: "
+-                      "reneighboring is required after every MC block");
++    error->all(FLERR,
++               "Cannot use fix mc/sites with neigh_modify once yes: "
++               "reneighboring is required after every MC block");
+ 
+   // the fix resolves owners of catalogue entries through the global atom map;
+   // create one if absent (same pattern as the GRACE pair styles)
+@@ -333,8 +333,8 @@ void FixMCSites::read_sites_file()
+ 
+   if (comm->me == 0) {
+     FILE *fp = fopen(sites_file, "r");
+-    if (!fp) error->one(FLERR, "Cannot open fix mc/sites file {}: {}", sites_file,
+-                        utils::getsyserror());
++    if (!fp)
++      error->one(FLERR, "Cannot open fix mc/sites file {}: {}", sites_file, utils::getsyserror());
+     int maxsites = CATDELTA;
+     memory->create(buf, 3 * maxsites, "mc/sites:filebuf");
+     char line[1024];
+@@ -346,8 +346,7 @@ void FixMCSites::read_sites_file()
+       if (*ptr == '#' || *ptr == '\n' || *ptr == '\r' || *ptr == '\0') continue;
+       double xx, yy, zz;
+       if (sscanf(ptr, "%lg %lg %lg", &xx, &yy, &zz) != 3)
+-        error->one(FLERR, "Fix mc/sites file {} line {} is not an x y z triple", sites_file,
+-                   nline);
++        error->one(FLERR, "Fix mc/sites file {} line {} is not an x y z triple", sites_file, nline);
+       if (nsites == maxsites) {
+         maxsites += CATDELTA;
+         memory->grow(buf, 3 * maxsites, "mc/sites:filebuf");
+@@ -381,8 +380,8 @@ void FixMCSites::catalog_append(const double *xyz, double clearance, tagint tag)
+ {
+   if (ncatalog == maxcatalog) {
+     maxcatalog += CATDELTA;
+-    catalog = (SiteEntry *) memory->srealloc(catalog, maxcatalog * sizeof(SiteEntry),
+-                                             "mc/sites:catalog");
++    catalog =
++        (SiteEntry *) memory->srealloc(catalog, maxcatalog * sizeof(SiteEntry), "mc/sites:catalog");
+   }
+   catalog[ncatalog].x[0] = xyz[0];
+   catalog[ncatalog].x[1] = xyz[1];
+@@ -439,8 +438,7 @@ void FixMCSites::build_catalog()
+   }
+   double *occall;
+   memory->create(occall, MAX(ototal, 1), "mc/sites:occall");
+-  MPI_Allgatherv(occbuf, osendcount, MPI_DOUBLE, occall, orecvcounts, odispls, MPI_DOUBLE,
+-                 world);
++  MPI_Allgatherv(occbuf, osendcount, MPI_DOUBLE, occall, orecvcounts, odispls, MPI_DOUBLE, world);
+   int nocc = ototal / 4;
+   memory->destroy(occbuf);
+   memory->destroy(orecvcounts);
+@@ -477,8 +475,7 @@ void FixMCSites::build_catalog()
+       sendbuf[4 * i + 2] = larray[i][2];
+       sendbuf[4 * i + 3] = larray[i][3];    // clearance
+     }
+-    MPI_Allgatherv(sendbuf, sendcount, MPI_DOUBLE, recvbuf, recvcounts, displs, MPI_DOUBLE,
+-                   world);
++    MPI_Allgatherv(sendbuf, sendcount, MPI_DOUBLE, recvbuf, recvcounts, displs, MPI_DOUBLE, world);
+     int nsites = ntotal / 4;
+     for (int i = 0; i < nsites; i++) {
+       double *xyz = &recvbuf[4 * i];
+@@ -803,8 +800,9 @@ void FixMCSites::run_source_mode()
+     if (nempty == 0) {
+       nsource_skip += rate - ninserted;
+       if (comm->me == 0)
+-        error->warning(FLERR, "Fix mc/sites {}: site catalogue exhausted in source mode ({} "
+-                              "insertions skipped)",
++        error->warning(FLERR,
++                       "Fix mc/sites {}: site catalogue exhausted in source mode ({} "
++                       "insertions skipped)",
+                        id, rate - ninserted);
+       break;
+     }
+diff --git a/src/MC/fix_mc_sites.h b/src/MC/fix_mc_sites.h
+index 67f763d..783cafb 100644
+--- a/src/MC/fix_mc_sites.h
++++ b/src/MC/fix_mc_sites.h
+@@ -46,29 +46,29 @@ class FixMCSites : public Fix {
+     tagint tag;
+   };
+ 
+-  int mcs_nevery;          // MD steps between MC blocks
+-  int ntrials;             // trial flips per block
+-  int mcs_type;            // atom type of the MC species
+-  int seed;                // RNG seed
+-  double temp;             // MC temperature
+-  char *temp_var_name;     // equal-style variable for temp (or null)
++  int mcs_nevery;         // MD steps between MC blocks
++  int ntrials;            // trial flips per block
++  int mcs_type;           // atom type of the MC species
++  int seed;               // RNG seed
++  double temp;            // MC temperature
++  char *temp_var_name;    // equal-style variable for temp (or null)
+   int temp_var;
+-  int mode;                // MODE_GC or MODE_SOURCE
+-  double mu;               // lattice-gas chemical potential (gc mode)
+-  char *mu_var_name;       // equal-style variable for mu (or null)
++  int mode;             // MODE_GC or MODE_SOURCE
++  double mu;            // lattice-gas chemical potential (gc mode)
++  char *mu_var_name;    // equal-style variable for mu (or null)
+   int mu_var;
+-  int rate;                // insertions per invocation (source mode)
+-  double tfac_insert;      // inserted-atom velocity temperature scale
+-  double charge_val;       // charge assigned to inserted atoms
++  int rate;              // insertions per invocation (source mode)
++  double tfac_insert;    // inserted-atom velocity temperature scale
++  double charge_val;     // charge assigned to inserted atoms
+   int charge_flag;
+-  bigint maxspecies;       // cap on N_species (insertions skipped above)
+-  double overlap_cutoff;   // pre-reject insertions at clearance below this
++  bigint maxspecies;        // cap on N_species (insertions skipped above)
++  double overlap_cutoff;    // pre-reject insertions at clearance below this
+ 
+   char *idsites_compute;    // sites compute ID (dynamic catalogue) or null
+   class Compute *sites_compute;
+-  char *sites_file;         // static site-list file (validation mode) or null
+-  int nfile_sites;          // rows in the file list
+-  double **file_xyz;        // file site positions (wrapped into the box)
++  char *sites_file;     // static site-list file (validation mode) or null
++  int nfile_sites;      // rows in the file list
++  double **file_xyz;    // file site positions (wrapped into the box)
+ 
+   char *idregion;
+   class Region *region;
+@@ -76,7 +76,7 @@ class FixMCSites : public Fix {
+   class RanPark *random_equal;      // identical stream on all ranks
+   class RanPark *random_unequal;    // owner-only draws (velocities)
+   class Compute *c_pe;
+-  int *grace_energy_only;           // GRACE extract hook (or null)
++  int *grace_energy_only;    // GRACE extract hook (or null)
+ 
+   double beta, sigma, gas_mass;
+   double energy_stored;
+@@ -84,7 +84,7 @@ class FixMCSites : public Fix {
+   double *sublo, *subhi;
+   int groupbitall;
+ 
+-  double *exchbuf;      // pack_exchange buffer for deletion-trial restore
++  double *exchbuf;    // pack_exchange buffer for deletion-trial restore
+   int exchbufsize;
+ 
+   SiteEntry *catalog;    // frozen per-block catalogue, replicated on all ranks
+diff --git a/src/VORONOI/compute_sites_voronoi.cpp b/src/VORONOI/compute_sites_voronoi.cpp
+index b894b6d..d1c7c2e 100644
+--- a/src/VORONOI/compute_sites_voronoi.cpp
++++ b/src/VORONOI/compute_sites_voronoi.cpp
+@@ -35,12 +35,12 @@
+ 
+ using namespace LAMMPS_NS;
+ 
+-static constexpr int SITESDELTA = 4096;         // grow chunk for the local site table
+-static constexpr double BOUND_EPS = 0.01;       // container bound fudge (as compute voronoi/atom)
+-static constexpr double BIGWINDOW = 1.0e30;     // "no upper bound" sentinel
+-static constexpr int MAXBINS1D = 64;            // cap on clustering/criteria bin grid per dim
+-static constexpr double MERGE_MARGIN = 4.0;     // collection halo, in units of rmerge
+-static constexpr double OWN_NUDGE = 1.0e-9;     // relative ownership tie-break offset
++static constexpr int SITESDELTA = 4096;        // grow chunk for the local site table
++static constexpr double BOUND_EPS = 0.01;      // container bound fudge (as compute voronoi/atom)
++static constexpr double BIGWINDOW = 1.0e30;    // "no upper bound" sentinel
++static constexpr int MAXBINS1D = 64;           // cap on clustering/criteria bin grid per dim
++static constexpr double MERGE_MARGIN = 4.0;    // collection halo, in units of rmerge
++static constexpr double OWN_NUDGE = 1.0e-9;    // relative ownership tie-break offset
+ 
+ namespace {
+ 
+@@ -127,8 +127,8 @@ void uf_union(std::vector<int> &parent, int i, int j)
+ /* ---------------------------------------------------------------------- */
+ 
+ ComputeSitesVoronoi::ComputeSitesVoronoi(LAMMPS *lmp, int narg, char **arg) :
+-    Compute(lmp, narg, arg), idregion(nullptr), region(nullptr), rminstr(nullptr),
+-    rmaxstr(nullptr), vminstr(nullptr), vmaxstr(nullptr), sites(nullptr)
++    Compute(lmp, narg, arg), idregion(nullptr), region(nullptr), rminstr(nullptr), rmaxstr(nullptr),
++    vminstr(nullptr), vmaxstr(nullptr), sites(nullptr)
+ {
+   rmerge = -1.0;
+   rmin = 0.0;
+@@ -213,8 +213,7 @@ ComputeSitesVoronoi::ComputeSitesVoronoi(LAMMPS *lmp, int narg, char **arg) :
+       coord_flag = 1;
+       iarg += 3;
+     } else if (strcmp(arg[iarg], "hostgroup") == 0) {
+-      if (iarg + 2 > narg)
+-        utils::missing_cmd_args(FLERR, "compute sites/voronoi hostgroup", error);
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi hostgroup", error);
+       int igroup = group->find(arg[iarg + 1]);
+       if (igroup < 0)
+         error->all(FLERR, "Compute sites/voronoi hostgroup {} does not exist", arg[iarg + 1]);
+@@ -228,8 +227,7 @@ ComputeSitesVoronoi::ComputeSitesVoronoi(LAMMPS *lmp, int narg, char **arg) :
+       occcut_flag = 1;
+       iarg += 2;
+     } else if (strcmp(arg[iarg], "exclgroup") == 0) {
+-      if (iarg + 2 > narg)
+-        utils::missing_cmd_args(FLERR, "compute sites/voronoi exclgroup", error);
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi exclgroup", error);
+       int igroup = group->find(arg[iarg + 1]);
+       if (igroup < 0)
+         error->all(FLERR, "Compute sites/voronoi exclgroup {} does not exist", arg[iarg + 1]);
+@@ -270,13 +268,11 @@ ComputeSitesVoronoi::~ComputeSitesVoronoi()
+ 
+ void ComputeSitesVoronoi::init()
+ {
+-  if (domain->dimension == 2)
+-    error->all(FLERR, "Compute sites/voronoi requires a 3d simulation");
++  if (domain->dimension == 2) error->all(FLERR, "Compute sites/voronoi requires a 3d simulation");
+ 
+   if (idregion) {
+     region = domain->get_region_by_id(idregion);
+-    if (!region)
+-      error->all(FLERR, "Region {} for compute sites/voronoi does not exist", idregion);
++    if (!region) error->all(FLERR, "Region {} for compute sites/voronoi does not exist", idregion);
+   }
+ 
+   if (rminstr) {
+diff --git a/src/VORONOI/compute_sites_voronoi.h b/src/VORONOI/compute_sites_voronoi.h
+index c732bbd..0889f84 100644
+--- a/src/VORONOI/compute_sites_voronoi.h
++++ b/src/VORONOI/compute_sites_voronoi.h
+@@ -34,25 +34,25 @@ class ComputeSitesVoronoi : public Compute {
+   double memory_usage() override;
+ 
+  private:
+-  double rmerge;          // vertex merge (clustering) distance
+-  double rmin, rmax;      // clearance window (empty-sphere radius)
+-  double vmin, vmax;      // probe Voronoi volume window
+-  int volume_flag;        // 1 if probe volume metric is active
+-  int coord_kmin;         // min # of host atoms within coord_rcut
+-  double coord_rcut;      // coordination cutoff
+-  int coord_flag;         // 1 if coordination criterion active
+-  int hostgroupbit;       // group of atoms counted for coordination
+-  double occcut;          // exclusion distance around exclgroup atoms
+-  int exclgroupbit;       // group of atoms carrying the occcut veto
+-  int occcut_flag;        // 1 if occcut/exclgroup veto active
+-  char *idregion;         // region ID for site filtering (or null)
++  double rmerge;        // vertex merge (clustering) distance
++  double rmin, rmax;    // clearance window (empty-sphere radius)
++  double vmin, vmax;    // probe Voronoi volume window
++  int volume_flag;      // 1 if probe volume metric is active
++  int coord_kmin;       // min # of host atoms within coord_rcut
++  double coord_rcut;    // coordination cutoff
++  int coord_flag;       // 1 if coordination criterion active
++  int hostgroupbit;     // group of atoms counted for coordination
++  double occcut;        // exclusion distance around exclgroup atoms
++  int exclgroupbit;     // group of atoms carrying the occcut veto
++  int occcut_flag;      // 1 if occcut/exclgroup veto active
++  char *idregion;       // region ID for site filtering (or null)
+   class Region *region;
+ 
+   char *rminstr, *rmaxstr, *vminstr, *vmaxstr;    // equal-style variable names
+   int rminvar, rmaxvar, vminvar, vmaxvar;         // variable indices
+ 
+-  int nsitesmax;      // allocated rows of array_local
+-  double **sites;     // local site table: x y z clearance [volume] coord
++  int nsitesmax;     // allocated rows of array_local
++  double **sites;    // local site table: x y z clearance [volume] coord
+   int cutghost_warned;
+ 
+   void evaluate_variables();
+-- 
+2.54.0
+

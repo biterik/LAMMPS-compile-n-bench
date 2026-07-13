@@ -1,0 +1,760 @@
+From a613785afebf8082853e41cb12f636f664c62b06 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Tue, 7 Jul 2026 20:58:12 +0200
+Subject: [PATCH 1/5] Add compute sites/voronoi: Voronoi-vertex site catalogue
+
+Vertices of the voro++ tessellation of all group atoms = centers of
+largest empty spheres. Per-rank extraction with ghost halo, rmerge
+single-linkage clustering (centroid, min clearance), deterministic
+ownership tie-break (1e-9 box nudge) for sites exactly on periodic/
+subdomain faces, criteria: clearance window (equal-var capable),
+region, coordination (hostgroup), occcut/exclgroup veto, optional
+probe Voronoi volume via compute_ghost_cell. Local array
+x y z clearance [volume] coord + global scalar site count.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01E5m4kr1kzqsqfBYcMWckk7
+---
+ src/VORONOI/compute_sites_voronoi.cpp | 658 ++++++++++++++++++++++++++
+ src/VORONOI/compute_sites_voronoi.h   |  64 +++
+ 2 files changed, 722 insertions(+)
+ create mode 100644 src/VORONOI/compute_sites_voronoi.cpp
+ create mode 100644 src/VORONOI/compute_sites_voronoi.h
+
+diff --git a/src/VORONOI/compute_sites_voronoi.cpp b/src/VORONOI/compute_sites_voronoi.cpp
+new file mode 100644
+index 0000000..b894b6d
+--- /dev/null
++++ b/src/VORONOI/compute_sites_voronoi.cpp
+@@ -0,0 +1,658 @@
++/* ----------------------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++/* ----------------------------------------------------------------------
++   Contributing author: Erik Bitzek (erik.bitzek@googlemail.com)
++------------------------------------------------------------------------- */
++
++#include "compute_sites_voronoi.h"
++
++#include "atom.h"
++#include "comm.h"
++#include "domain.h"
++#include "error.h"
++#include "group.h"
++#include "input.h"
++#include "memory.h"
++#include "region.h"
++#include "update.h"
++#include "variable.h"
++
++#include <cmath>
++#include <cstring>
++#include <vector>
++#include <voro++.hh>
++
++using namespace LAMMPS_NS;
++
++static constexpr int SITESDELTA = 4096;         // grow chunk for the local site table
++static constexpr double BOUND_EPS = 0.01;       // container bound fudge (as compute voronoi/atom)
++static constexpr double BIGWINDOW = 1.0e30;     // "no upper bound" sentinel
++static constexpr int MAXBINS1D = 64;            // cap on clustering/criteria bin grid per dim
++static constexpr double MERGE_MARGIN = 4.0;     // collection halo, in units of rmerge
++static constexpr double OWN_NUDGE = 1.0e-9;     // relative ownership tie-break offset
++
++namespace {
++
++// simple cell-list over an axis-aligned box; bin size >= cutoff so a 27-bin
++// scan finds all neighbors within cutoff
++
++struct BinGrid {
++  double lo[3], inv[3];
++  int nb[3];
++  std::vector<std::vector<int>> bins;
++
++  void setup(const double *blo, const double *bhi, double cutoff)
++  {
++    for (int d = 0; d < 3; d++) {
++      lo[d] = blo[d];
++      double ext = bhi[d] - blo[d];
++      if (ext <= 0.0) ext = cutoff;
++      nb[d] = (int) (ext / cutoff);
++      if (nb[d] < 1) nb[d] = 1;
++      if (nb[d] > MAXBINS1D) nb[d] = MAXBINS1D;
++      inv[d] = nb[d] / ext;
++    }
++    bins.assign((std::size_t) nb[0] * nb[1] * nb[2], {});
++  }
++
++  int coord2bin(const double *p, int *ib) const
++  {
++    for (int d = 0; d < 3; d++) {
++      int i = (int) ((p[d] - lo[d]) * inv[d]);
++      if (i < 0) i = 0;
++      if (i >= nb[d]) i = nb[d] - 1;
++      ib[d] = i;
++    }
++    return (ib[2] * nb[1] + ib[1]) * nb[0] + ib[0];
++  }
++
++  void insert(const double *p, int idx)
++  {
++    int ib[3];
++    bins[coord2bin(p, ib)].push_back(idx);
++  }
++
++  // append indices of all entries in the 27 bins around p to out
++
++  void gather_neighborhood(const double *p, std::vector<int> &out) const
++  {
++    int ib[3];
++    coord2bin(p, ib);
++    for (int dz = -1; dz <= 1; dz++) {
++      int iz = ib[2] + dz;
++      if (iz < 0 || iz >= nb[2]) continue;
++      for (int dy = -1; dy <= 1; dy++) {
++        int iy = ib[1] + dy;
++        if (iy < 0 || iy >= nb[1]) continue;
++        for (int dx = -1; dx <= 1; dx++) {
++          int ix = ib[0] + dx;
++          if (ix < 0 || ix >= nb[0]) continue;
++          const std::vector<int> &b = bins[(std::size_t) (iz * nb[1] + iy) * nb[0] + ix];
++          out.insert(out.end(), b.begin(), b.end());
++        }
++      }
++    }
++  }
++};
++
++int uf_find(std::vector<int> &parent, int i)
++{
++  while (parent[i] != i) {
++    parent[i] = parent[parent[i]];
++    i = parent[i];
++  }
++  return i;
++}
++
++void uf_union(std::vector<int> &parent, int i, int j)
++{
++  int ri = uf_find(parent, i);
++  int rj = uf_find(parent, j);
++  if (ri != rj) parent[rj] = ri;
++}
++
++}    // namespace
++
++/* ---------------------------------------------------------------------- */
++
++ComputeSitesVoronoi::ComputeSitesVoronoi(LAMMPS *lmp, int narg, char **arg) :
++    Compute(lmp, narg, arg), idregion(nullptr), region(nullptr), rminstr(nullptr),
++    rmaxstr(nullptr), vminstr(nullptr), vmaxstr(nullptr), sites(nullptr)
++{
++  rmerge = -1.0;
++  rmin = 0.0;
++  rmax = BIGWINDOW;
++  vmin = 0.0;
++  vmax = BIGWINDOW;
++  volume_flag = 0;
++  coord_flag = 0;
++  coord_kmin = 0;
++  coord_rcut = 0.0;
++  hostgroupbit = groupbit;
++  occcut = 0.0;
++  occcut_flag = 0;
++  exclgroupbit = 0;
++  rminvar = rmaxvar = vminvar = vmaxvar = -1;
++  nsitesmax = 0;
++  cutghost_warned = 0;
++
++  int iarg = 3;
++  while (iarg < narg) {
++    if (strcmp(arg[iarg], "rmerge") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi rmerge", error);
++      rmerge = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      if (rmerge <= 0.0)
++        error->all(FLERR, "Compute sites/voronoi rmerge must be > 0.0, got {}", rmerge);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "rmin") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi rmin", error);
++      if (utils::strmatch(arg[iarg + 1], "^v_")) {
++        delete[] rminstr;
++        rminstr = utils::strdup(arg[iarg + 1] + 2);
++      } else
++        rmin = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "rmax") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi rmax", error);
++      if (utils::strmatch(arg[iarg + 1], "^v_")) {
++        delete[] rmaxstr;
++        rmaxstr = utils::strdup(arg[iarg + 1] + 2);
++      } else
++        rmax = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "vmin") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi vmin", error);
++      if (utils::strmatch(arg[iarg + 1], "^v_")) {
++        delete[] vminstr;
++        vminstr = utils::strdup(arg[iarg + 1] + 2);
++      } else
++        vmin = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      volume_flag = 1;
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "vmax") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi vmax", error);
++      if (utils::strmatch(arg[iarg + 1], "^v_")) {
++        delete[] vmaxstr;
++        vmaxstr = utils::strdup(arg[iarg + 1] + 2);
++      } else
++        vmax = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      volume_flag = 1;
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "metric") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi metric", error);
++      if (strcmp(arg[iarg + 1], "radius") == 0)
++        ;    // radius column is always present
++      else if (strcmp(arg[iarg + 1], "volume") == 0)
++        volume_flag = 1;
++      else
++        error->all(FLERR, "Unknown compute sites/voronoi metric: {}", arg[iarg + 1]);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "region") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi region", error);
++      delete[] idregion;
++      idregion = utils::strdup(arg[iarg + 1]);
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "coord") == 0) {
++      if (iarg + 3 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi coord", error);
++      coord_kmin = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
++      coord_rcut = utils::numeric(FLERR, arg[iarg + 2], false, lmp);
++      if (coord_kmin < 1 || coord_rcut <= 0.0)
++        error->all(FLERR, "Invalid compute sites/voronoi coord arguments: {} {}", coord_kmin,
++                   coord_rcut);
++      coord_flag = 1;
++      iarg += 3;
++    } else if (strcmp(arg[iarg], "hostgroup") == 0) {
++      if (iarg + 2 > narg)
++        utils::missing_cmd_args(FLERR, "compute sites/voronoi hostgroup", error);
++      int igroup = group->find(arg[iarg + 1]);
++      if (igroup < 0)
++        error->all(FLERR, "Compute sites/voronoi hostgroup {} does not exist", arg[iarg + 1]);
++      hostgroupbit = group->bitmask[igroup];
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "occcut") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "compute sites/voronoi occcut", error);
++      occcut = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
++      if (occcut <= 0.0)
++        error->all(FLERR, "Compute sites/voronoi occcut must be > 0.0, got {}", occcut);
++      occcut_flag = 1;
++      iarg += 2;
++    } else if (strcmp(arg[iarg], "exclgroup") == 0) {
++      if (iarg + 2 > narg)
++        utils::missing_cmd_args(FLERR, "compute sites/voronoi exclgroup", error);
++      int igroup = group->find(arg[iarg + 1]);
++      if (igroup < 0)
++        error->all(FLERR, "Compute sites/voronoi exclgroup {} does not exist", arg[iarg + 1]);
++      exclgroupbit = group->bitmask[igroup];
++      iarg += 2;
++    } else
++      error->all(FLERR, "Unknown compute sites/voronoi keyword: {}", arg[iarg]);
++  }
++
++  if (rmerge <= 0.0)
++    error->all(FLERR, "Compute sites/voronoi requires the rmerge keyword with a value > 0.0");
++  if (occcut_flag && !exclgroupbit)
++    error->all(FLERR, "Compute sites/voronoi occcut requires the exclgroup keyword");
++  if (exclgroupbit && !occcut_flag)
++    error->all(FLERR, "Compute sites/voronoi exclgroup requires the occcut keyword");
++
++  local_flag = 1;
++  size_local_rows = 0;
++  size_local_cols = volume_flag ? 6 : 5;    // x y z clearance [volume] coord
++
++  scalar_flag = 1;
++  extscalar = 0;
++}
++
++/* ---------------------------------------------------------------------- */
++
++ComputeSitesVoronoi::~ComputeSitesVoronoi()
++{
++  delete[] idregion;
++  delete[] rminstr;
++  delete[] rmaxstr;
++  delete[] vminstr;
++  delete[] vmaxstr;
++  memory->destroy(sites);
++}
++
++/* ---------------------------------------------------------------------- */
++
++void ComputeSitesVoronoi::init()
++{
++  if (domain->dimension == 2)
++    error->all(FLERR, "Compute sites/voronoi requires a 3d simulation");
++
++  if (idregion) {
++    region = domain->get_region_by_id(idregion);
++    if (!region)
++      error->all(FLERR, "Region {} for compute sites/voronoi does not exist", idregion);
++  }
++
++  if (rminstr) {
++    rminvar = input->variable->find(rminstr);
++    if (rminvar < 0)
++      error->all(FLERR, "Variable {} for compute sites/voronoi rmin does not exist", rminstr);
++    if (!input->variable->equalstyle(rminvar))
++      error->all(FLERR, "Variable {} for compute sites/voronoi rmin is not equal-style", rminstr);
++  }
++  if (rmaxstr) {
++    rmaxvar = input->variable->find(rmaxstr);
++    if (rmaxvar < 0)
++      error->all(FLERR, "Variable {} for compute sites/voronoi rmax does not exist", rmaxstr);
++    if (!input->variable->equalstyle(rmaxvar))
++      error->all(FLERR, "Variable {} for compute sites/voronoi rmax is not equal-style", rmaxstr);
++  }
++  if (vminstr) {
++    vminvar = input->variable->find(vminstr);
++    if (vminvar < 0)
++      error->all(FLERR, "Variable {} for compute sites/voronoi vmin does not exist", vminstr);
++    if (!input->variable->equalstyle(vminvar))
++      error->all(FLERR, "Variable {} for compute sites/voronoi vmin is not equal-style", vminstr);
++  }
++  if (vmaxstr) {
++    vmaxvar = input->variable->find(vmaxstr);
++    if (vmaxvar < 0)
++      error->all(FLERR, "Variable {} for compute sites/voronoi vmax does not exist", vmaxstr);
++    if (!input->variable->equalstyle(vmaxvar))
++      error->all(FLERR, "Variable {} for compute sites/voronoi vmax is not equal-style", vmaxstr);
++  }
++}
++
++/* ---------------------------------------------------------------------- */
++
++void ComputeSitesVoronoi::evaluate_variables()
++{
++  if (rminvar >= 0) rmin = input->variable->compute_equal(rminvar);
++  if (rmaxvar >= 0) rmax = input->variable->compute_equal(rmaxvar);
++  if (vminvar >= 0) vmin = input->variable->compute_equal(vminvar);
++  if (vmaxvar >= 0) vmax = input->variable->compute_equal(vmaxvar);
++  if (rmin > rmax)
++    error->all(FLERR, "Compute sites/voronoi clearance window is empty: rmin {} > rmax {}", rmin,
++               rmax);
++  if (vmin > vmax)
++    error->all(FLERR, "Compute sites/voronoi volume window is empty: vmin {} > vmax {}", vmin,
++               vmax);
++}
++
++/* ----------------------------------------------------------------------
++   build the site catalogue for this processor:
++   1. voro++ tessellation of all group atoms (local + ghost) in the
++      subdomain extended by the ghost cutoff (mirrors compute voronoi/atom)
++   2. collect cell vertices (absolute position + empty-sphere radius =
++      distance to generator) inside the subdomain + merge halo
++   3. single-linkage clustering with cutoff rmerge; cluster -> centroid,
++      clearance = min over members
++   4. keep only clusters whose centroid lies in this rank's subdomain
++      (half-open [sublo,subhi) -> globally duplicate-free)
++   5. apply criteria: clearance window, region, coordination, occcut,
++      optional probe Voronoi volume window
++------------------------------------------------------------------------- */
++
++void ComputeSitesVoronoi::compute_local()
++{
++  invoked_local = update->ntimestep;
++  evaluate_variables();
++
++  const int nlocal = atom->nlocal;
++  const int nall = nlocal + atom->nghost;
++  const int triclinic = domain->triclinic;
++  double **x = atom->x;
++  int *mask = atom->mask;
++
++  // per-processor voro++ container bounds (see compute_voronoi_atom.cpp buildCells)
++
++  double *cut = comm->cutghost;
++  double sublo_bound[3], subhi_bound[3];
++
++  if (triclinic) {
++    double sublo_bound_lamda[3], subhi_bound_lamda[3];
++    for (int d = 0; d < 3; d++) {
++      sublo_bound_lamda[d] = domain->sublo_lamda[d] - cut[d] - BOUND_EPS;
++      subhi_bound_lamda[d] = domain->subhi_lamda[d] + cut[d] + BOUND_EPS;
++      if (domain->periodicity[d] == 0) {
++        sublo_bound_lamda[d] = MAX(sublo_bound_lamda[d], 0.0);
++        subhi_bound_lamda[d] = MIN(subhi_bound_lamda[d], 1.0);
++      }
++    }
++    domain->bbox(sublo_bound_lamda, subhi_bound_lamda, sublo_bound, subhi_bound);
++  } else {
++    for (int d = 0; d < 3; d++) {
++      sublo_bound[d] = domain->sublo[d] - cut[d] - BOUND_EPS;
++      subhi_bound[d] = domain->subhi[d] + cut[d] + BOUND_EPS;
++      if (domain->periodicity[d] == 0) {
++        sublo_bound[d] = MAX(sublo_bound[d], domain->boxlo[d]);
++        subhi_bound[d] = MIN(subhi_bound[d], domain->boxhi[d]);
++      }
++    }
++  }
++
++  // vertex collection window: subdomain + halo of MERGE_MARGIN*rmerge so
++  // that merge clusters straddling rank boundaries see all their members.
++  // window tests are in lamda coordinates for triclinic boxes.
++
++  double halo = MERGE_MARGIN * rmerge;
++  double win_lo[3], win_hi[3];
++  if (triclinic) {
++    for (int d = 0; d < 3; d++) {
++      double halo_lamda = halo / domain->prd[d];
++      win_lo[d] = domain->sublo_lamda[d] - halo_lamda;
++      win_hi[d] = domain->subhi_lamda[d] + halo_lamda;
++    }
++  } else {
++    for (int d = 0; d < 3; d++) {
++      win_lo[d] = domain->sublo[d] - halo;
++      win_hi[d] = domain->subhi[d] + halo;
++    }
++  }
++
++  // voro++ spatial hash sizing: ~8 particles per block
++
++  double blen[3], V;
++  for (int d = 0; d < 3; d++) blen[d] = subhi_bound[d] - sublo_bound[d];
++  V = blen[0] * blen[1] * blen[2];
++  int nblk[3];
++  for (int d = 0; d < 3; d++) {
++    nblk[d] = (int) round(blen[d] * pow((double) MAX(nall, 1) / (V * 8.0), 0.333333));
++    if (nblk[d] < 1) nblk[d] = 1;
++  }
++
++  voro::container con(sublo_bound[0], subhi_bound[0], sublo_bound[1], subhi_bound[1],
++                      sublo_bound[2], subhi_bound[2], nblk[0], nblk[1], nblk[2], false, false,
++                      false, 8);
++
++  for (int i = 0; i < nall; i++)
++    if (mask[i] & groupbit) con.put(i, x[i][0], x[i][1], x[i][2]);
++
++  // collect raw vertices (absolute position + clearance) inside the window
++
++  std::vector<double> vx, vy, vz, vr;
++  std::vector<double> vbuf;
++  voro::voronoicell cell;
++  voro::c_loop_all cl(con);
++  if (cl.start()) do {
++      if (!con.compute_cell(cell, cl)) continue;
++      double gx, gy, gz;
++      cl.pos(gx, gy, gz);
++      cell.vertices(gx, gy, gz, vbuf);
++      int nv = (int) vbuf.size() / 3;
++      for (int k = 0; k < nv; k++) {
++        double p[3] = {vbuf[3 * k], vbuf[3 * k + 1], vbuf[3 * k + 2]};
++        double wtest[3] = {p[0], p[1], p[2]};
++        if (triclinic) domain->x2lamda(p, wtest);
++        if (wtest[0] < win_lo[0] || wtest[0] >= win_hi[0] || wtest[1] < win_lo[1] ||
++            wtest[1] >= win_hi[1] || wtest[2] < win_lo[2] || wtest[2] >= win_hi[2])
++          continue;
++        double dx = p[0] - gx, dy = p[1] - gy, dz = p[2] - gz;
++        vx.push_back(p[0]);
++        vy.push_back(p[1]);
++        vz.push_back(p[2]);
++        vr.push_back(sqrt(dx * dx + dy * dy + dz * dz));
++      }
++    } while (cl.inc());
++
++  int nvert = (int) vx.size();
++
++  // single-linkage clustering with cutoff rmerge via a cell list
++
++  std::vector<int> parent(nvert);
++  for (int i = 0; i < nvert; i++) parent[i] = i;
++
++  if (nvert) {
++    double vlo[3] = {vx[0], vy[0], vz[0]};
++    double vhi[3] = {vx[0], vy[0], vz[0]};
++    for (int i = 1; i < nvert; i++) {
++      vlo[0] = MIN(vlo[0], vx[i]);
++      vhi[0] = MAX(vhi[0], vx[i]);
++      vlo[1] = MIN(vlo[1], vy[i]);
++      vhi[1] = MAX(vhi[1], vy[i]);
++      vlo[2] = MIN(vlo[2], vz[i]);
++      vhi[2] = MAX(vhi[2], vz[i]);
++    }
++    BinGrid grid;
++    grid.setup(vlo, vhi, rmerge);
++    for (int i = 0; i < nvert; i++) {
++      double p[3] = {vx[i], vy[i], vz[i]};
++      grid.insert(p, i);
++    }
++    const double rmergesq = rmerge * rmerge;
++    std::vector<int> neigh;
++    for (int i = 0; i < nvert; i++) {
++      double p[3] = {vx[i], vy[i], vz[i]};
++      neigh.clear();
++      grid.gather_neighborhood(p, neigh);
++      for (int j : neigh) {
++        if (j >= i) continue;
++        double dx = vx[i] - vx[j], dy = vy[i] - vy[j], dz = vz[i] - vz[j];
++        if (dx * dx + dy * dy + dz * dz <= rmergesq) uf_union(parent, i, j);
++      }
++    }
++  }
++
++  // accumulate clusters: centroid + min clearance
++
++  std::vector<int> rootmap(nvert, -1);
++  std::vector<double> cx, cy, cz, cr;
++  std::vector<int> cn;
++  for (int i = 0; i < nvert; i++) {
++    int r = uf_find(parent, i);
++    int c = rootmap[r];
++    if (c < 0) {
++      c = (int) cx.size();
++      rootmap[r] = c;
++      cx.push_back(0.0);
++      cy.push_back(0.0);
++      cz.push_back(0.0);
++      cr.push_back(BIGWINDOW);
++      cn.push_back(0);
++    }
++    cx[c] += vx[i];
++    cy[c] += vy[i];
++    cz[c] += vz[i];
++    cr[c] = MIN(cr[c], vr[i]);
++    cn[c]++;
++  }
++  int nclust = (int) cx.size();
++  for (int c = 0; c < nclust; c++) {
++    cx[c] /= cn[c];
++    cy[c] /= cn[c];
++    cz[c] /= cn[c];
++  }
++
++  // criteria helpers: atom cell lists for coordination and occcut vetoes
++
++  BinGrid coordgrid, exclgrid;
++  double alo[3], ahi[3];
++  if ((coord_flag || occcut_flag) && nall) {
++    alo[0] = ahi[0] = x[0][0];
++    alo[1] = ahi[1] = x[0][1];
++    alo[2] = ahi[2] = x[0][2];
++    for (int i = 1; i < nall; i++)
++      for (int d = 0; d < 3; d++) {
++        alo[d] = MIN(alo[d], x[i][d]);
++        ahi[d] = MAX(ahi[d], x[i][d]);
++      }
++  }
++  if (coord_flag && nall) {
++    coordgrid.setup(alo, ahi, coord_rcut);
++    for (int i = 0; i < nall; i++) {
++      if (mask[i] & hostgroupbit) coordgrid.insert(x[i], i);
++    }
++  }
++  if (occcut_flag && nall) {
++    exclgrid.setup(alo, ahi, occcut);
++    for (int i = 0; i < nall; i++) {
++      if (mask[i] & exclgroupbit) exclgrid.insert(x[i], i);
++    }
++  }
++
++  if (region) region->prematch();
++
++  // ownership + criteria pass; fill the local array
++
++  double *sublo = triclinic ? domain->sublo_lamda : domain->sublo;
++  double *subhi = triclinic ? domain->subhi_lamda : domain->subhi;
++  const double coordcutsq = coord_rcut * coord_rcut;
++  const double occcutsq = occcut * occcut;
++  double cutghost_min = MIN(cut[0], MIN(cut[1], cut[2]));
++  std::vector<int> neigh;
++
++  // ownership tie-break: a site sitting exactly on a subdomain or periodic
++  // box face (common on ideal lattices) is computed by two ranks (or twice,
++  // as periodic images) with only last-ulp position differences.  Nudging the
++  // test coordinate by a fixed offset far above fp noise and far below any
++  // real inter-site distance makes exactly one copy pass its owner's
++  // half-open [sublo,subhi) test.  No wrapping: the partner image of a
++  // dropped high-face copy always exists on the low-face side.
++
++  double nudge[3];
++  if (triclinic)
++    nudge[0] = nudge[1] = nudge[2] = OWN_NUDGE;
++  else
++    for (int d = 0; d < 3; d++) nudge[d] = OWN_NUDGE * domain->prd[d];
++
++  int nsites = 0;
++  for (int c = 0; c < nclust; c++) {
++    double p[3] = {cx[c], cy[c], cz[c]};
++    double otest[3] = {p[0], p[1], p[2]};
++    if (triclinic) domain->x2lamda(p, otest);
++    for (int d = 0; d < 3; d++) otest[d] += nudge[d];
++    if (otest[0] < sublo[0] || otest[0] >= subhi[0] || otest[1] < sublo[1] ||
++        otest[1] >= subhi[1] || otest[2] < sublo[2] || otest[2] >= subhi[2])
++      continue;
++
++    if (cr[c] < rmin || cr[c] > rmax) continue;
++    if (region && !region->match(p[0], p[1], p[2])) continue;
++
++    int ncoord = 0;
++    if (coord_flag) {
++      neigh.clear();
++      coordgrid.gather_neighborhood(p, neigh);
++      for (int j : neigh) {
++        double dx = p[0] - x[j][0], dy = p[1] - x[j][1], dz = p[2] - x[j][2];
++        if (dx * dx + dy * dy + dz * dz <= coordcutsq) ncoord++;
++      }
++      if (ncoord < coord_kmin) continue;
++    }
++
++    if (occcut_flag) {
++      neigh.clear();
++      exclgrid.gather_neighborhood(p, neigh);
++      int veto = 0;
++      for (int j : neigh) {
++        double dx = p[0] - x[j][0], dy = p[1] - x[j][1], dz = p[2] - x[j][2];
++        if (dx * dx + dy * dy + dz * dz <= occcutsq) {
++          veto = 1;
++          break;
++        }
++      }
++      if (veto) continue;
++    }
++
++    double vol = 0.0;
++    if (volume_flag) {
++      voro::voronoicell pcell;
++      if (con.compute_ghost_cell(pcell, p[0], p[1], p[2])) vol = pcell.volume();
++      if (vol < vmin || vol > vmax) continue;
++    }
++
++    // a kept site whose clearance reaches the ghost shell may be affected by
++    // atoms this rank cannot see: tessellation no longer trustworthy
++
++    if (cr[c] > cutghost_min && !cutghost_warned && comm->me == 0) {
++      cutghost_warned = 1;
++      error->warning(FLERR,
++                     "Compute sites/voronoi found a site with clearance {:.4} exceeding the "
++                     "ghost cutoff {:.4}; increase comm_modify cutoff or tighten rmax",
++                     cr[c], cutghost_min);
++    }
++
++    if (nsites >= nsitesmax) {
++      nsitesmax += SITESDELTA;
++      memory->grow(sites, nsitesmax, size_local_cols, "sites/voronoi:sites");
++      array_local = sites;
++    }
++    sites[nsites][0] = p[0];
++    sites[nsites][1] = p[1];
++    sites[nsites][2] = p[2];
++    sites[nsites][3] = cr[c];
++    if (volume_flag) {
++      sites[nsites][4] = vol;
++      sites[nsites][5] = ncoord;
++    } else
++      sites[nsites][4] = ncoord;
++    nsites++;
++  }
++
++  size_local_rows = nsites;
++}
++
++/* ----------------------------------------------------------------------
++   global number of accepted sites across all processors
++------------------------------------------------------------------------- */
++
++double ComputeSitesVoronoi::compute_scalar()
++{
++  invoked_scalar = update->ntimestep;
++  if (invoked_local != update->ntimestep) compute_local();
++  double nlocalsites = size_local_rows;
++  MPI_Allreduce(&nlocalsites, &scalar, 1, MPI_DOUBLE, MPI_SUM, world);
++  return scalar;
++}
++
++/* ---------------------------------------------------------------------- */
++
++double ComputeSitesVoronoi::memory_usage()
++{
++  return (double) nsitesmax * size_local_cols * sizeof(double);
++}
+diff --git a/src/VORONOI/compute_sites_voronoi.h b/src/VORONOI/compute_sites_voronoi.h
+new file mode 100644
+index 0000000..c732bbd
+--- /dev/null
++++ b/src/VORONOI/compute_sites_voronoi.h
+@@ -0,0 +1,64 @@
++/* -*- c++ -*- ----------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++#ifdef COMPUTE_CLASS
++// clang-format off
++ComputeStyle(sites/voronoi,ComputeSitesVoronoi);
++// clang-format on
++#else
++
++#ifndef LMP_COMPUTE_SITES_VORONOI_H
++#define LMP_COMPUTE_SITES_VORONOI_H
++
++#include "compute.h"
++
++namespace LAMMPS_NS {
++
++class ComputeSitesVoronoi : public Compute {
++ public:
++  ComputeSitesVoronoi(class LAMMPS *, int, char **);
++  ~ComputeSitesVoronoi() override;
++  void init() override;
++  void compute_local() override;
++  double compute_scalar() override;
++  double memory_usage() override;
++
++ private:
++  double rmerge;          // vertex merge (clustering) distance
++  double rmin, rmax;      // clearance window (empty-sphere radius)
++  double vmin, vmax;      // probe Voronoi volume window
++  int volume_flag;        // 1 if probe volume metric is active
++  int coord_kmin;         // min # of host atoms within coord_rcut
++  double coord_rcut;      // coordination cutoff
++  int coord_flag;         // 1 if coordination criterion active
++  int hostgroupbit;       // group of atoms counted for coordination
++  double occcut;          // exclusion distance around exclgroup atoms
++  int exclgroupbit;       // group of atoms carrying the occcut veto
++  int occcut_flag;        // 1 if occcut/exclgroup veto active
++  char *idregion;         // region ID for site filtering (or null)
++  class Region *region;
++
++  char *rminstr, *rmaxstr, *vminstr, *vmaxstr;    // equal-style variable names
++  int rminvar, rmaxvar, vminvar, vmaxvar;         // variable indices
++
++  int nsitesmax;      // allocated rows of array_local
++  double **sites;     // local site table: x y z clearance [volume] coord
++  int cutghost_warned;
++
++  void evaluate_variables();
++};
++
++}    // namespace LAMMPS_NS
++
++#endif
++#endif
+-- 
+2.54.0
+
