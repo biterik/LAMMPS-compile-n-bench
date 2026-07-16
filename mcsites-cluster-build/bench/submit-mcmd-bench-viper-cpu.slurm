@@ -34,14 +34,16 @@ LMP="${LMP:-$HERE/lammps-mcsites/build-mcsites-viper-cpu/lmp_mcsites_fork24da74_
 LOG="${LOG:-$HERE/log.${SLURM_JOB_ID:-out}.mcmd_bench_viper_cpu}"
 NCELL="${NCELL:-16}"; NMD="${NMD:-2000}"; NEVERY="${NEVERY:-20}"
 NTRIALS="${NTRIALS:-400}"; MU="${MU:--2.4}"; TEMP="${TEMP:-300.0}"; SEED="${SEED:-12345}"
+POT="${POT:-ni_h_rcut4.90_rcut2.eam.alloy}"   # override e.g. POT=NiAlH_jea.eam.alloy
 
-[ -x "$LMP" ] || { echo "ERROR: binary not found: $LMP" >&2; exit 1; }
+[ -x "$LMP" ] || { echo "ERROR: binary not found: $LMP  (set LMP=/path/to/lmp_mcsites_fork24da74_viper_cpu)" >&2; exit 1; }
+[ -f "$POTDIR/$POT" ] || { echo "ERROR: potential not found: $POTDIR/$POT" >&2; exit 1; }
 
 echo ">> binary : $LMP"
 echo ">> size   : ${NCELL}^3 fcc cells ($((4*NCELL*NCELL*NCELL)) Ni)  nmd=$NMD nevery=$NEVERY ntrials=$NTRIALS"
 
 srun "$LMP" -in "$IN" -log "$LOG" \
-     -var potdir "$POTDIR" -var N "$NCELL" -var nmd "$NMD" -var nevery "$NEVERY" \
+     -var potdir "$POTDIR" -var pot "$POT" -var N "$NCELL" -var nmd "$NMD" -var nevery "$NEVERY" \
      -var ntrials "$NTRIALS" -var mu "$MU" -var T "$TEMP" -var seed "$SEED"
 
 echo

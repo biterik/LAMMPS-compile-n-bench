@@ -24,7 +24,8 @@ variable nequil  index 1000      # equilibration MD steps (not timed)
 variable nmd     index 2000      # timed MD steps per phase
 variable nevery  index 20        # MC block every this many steps
 variable ntrials index 400       # trial flips per MC block
-variable potdir  index .         # dir holding ni_h_rcut4.90_rcut2.eam.alloy
+variable potdir  index .         # dir holding the EAM potential file
+variable pot     index ni_h_rcut4.90_rcut2.eam.alloy   # EAM Ni/H file name (override with -var pot)
 
 units           metal
 boundary        p p p
@@ -38,7 +39,9 @@ mass            1 58.69          # Ni
 mass            2 1.008          # H
 
 pair_style      eam/alloy
-pair_coeff      * * ${potdir}/ni_h_rcut4.90_rcut2.eam.alloy Ni H
+# Map atom type 1->Ni, 2->H. A multi-element file (e.g. NiAlH_jea.eam.alloy) works
+# too — just name the Ni and H columns and skip the rest.
+pair_coeff      * * ${potdir}/${pot} Ni H
 
 velocity        all create ${T} ${seed} mom yes rot yes
 timestep        0.001

@@ -47,9 +47,10 @@ LOG="${LOG:-$HERE/log.${SLURM_JOB_ID:-out}.mcmd_bench_viper_gpu}"
 # optional size/step overrides (forwarded to the input's -var)
 NCELL="${NCELL:-16}"; NMD="${NMD:-2000}"; NEVERY="${NEVERY:-20}"
 NTRIALS="${NTRIALS:-400}"; MU="${MU:--2.4}"; TEMP="${TEMP:-300.0}"; SEED="${SEED:-12345}"
+POT="${POT:-ni_h_rcut4.90_rcut2.eam.alloy}"   # EAM file in POTDIR; override e.g. POT=NiAlH_jea.eam.alloy
 
-[ -x "$LMP" ] || { echo "ERROR: binary not found/executable: $LMP" >&2; exit 1; }
-[ -f "$POTDIR/ni_h_rcut4.90_rcut2.eam.alloy" ] || echo "WARN: ni_h_rcut4.90_rcut2.eam.alloy not in $POTDIR" >&2
+[ -x "$LMP" ] || { echo "ERROR: binary not found/executable: $LMP  (set LMP=/path/to/lmp_mcsites_fork24da74_viper_gpu)" >&2; exit 1; }
+[ -f "$POTDIR/$POT" ] || { echo "ERROR: potential not found: $POTDIR/$POT  (set POTDIR/POT correctly)" >&2; exit 1; }
 
 echo ">> binary : $LMP"
 echo ">> potdir : $POTDIR"
@@ -57,7 +58,7 @@ echo ">> size   : ${NCELL}^3 fcc cells ($((4*NCELL*NCELL*NCELL)) Ni)  nmd=$NMD n
 
 srun "$LMP" -k on g 1 -sf kk -pk kokkos newton on neigh half \
      -in "$IN" -log "$LOG" \
-     -var potdir "$POTDIR" -var N "$NCELL" -var nmd "$NMD" -var nevery "$NEVERY" \
+     -var potdir "$POTDIR" -var pot "$POT" -var N "$NCELL" -var nmd "$NMD" -var nevery "$NEVERY" \
      -var ntrials "$NTRIALS" -var mu "$MU" -var T "$TEMP" -var seed "$SEED"
 
 # ===========================================================================

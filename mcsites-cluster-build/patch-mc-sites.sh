@@ -39,7 +39,7 @@ fi
 
 git checkout -q "$FORK_COMMIT"
 git checkout -q -b "$MCSITES_BRANCH"
-git am "$PATCHES_DIR"/00*.patch
+git -c user.email=mcsites@localhost -c user.name='mc-sites build' am "$PATCHES_DIR"/00*.patch
 
 echo ">> $MCSITES_BRANCH ready at: $(git log -1 --format='%H %s')"
 echo ">> patches applied: $(git rev-list --count "$FORK_COMMIT"..HEAD)  (expected 5)"
