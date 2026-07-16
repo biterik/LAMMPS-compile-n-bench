@@ -1,0 +1,79 @@
+# ===========================================================================
+# MD + MC (fix mc/sites) benchmark — EAM Ni/H, hydrogen charging of fcc Ni.
+# Goal: measure, on one GPU, (a) the cost of a plain MD step and (b) the cost of
+# one MC trial (a full EAM energy evaluation), so a production run of
+#   <nmd> MD steps  +  <nmd/nevery> blocks x <ntrials> trials
+# can be estimated as   nmd*t_md  +  (nmd/nevery)*ntrials*t_trial.
+#
+# Physics matches the validated Korbmacher anchor (fcc Ni a=3.52, octahedral H,
+# NPT 300 K / 0 bar, dynamic Voronoi site catalogue). It runs three phases:
+#   0. equilibrate (not timed)
+#   A. pure MD, <nmd> steps            -> "Loop time" #1 after equil
+#   B. MD + fix mc/sites, <nmd> steps  -> "Loop time" #2 after equil
+# The submit script parses the two loop times + the MC attempt counter.
+#
+# Override any variable with -var, e.g.:
+#   srun ... -in in.mcmd_bench_nih -var potdir /path -var N 24 -var ntrials 200
+# ===========================================================================
+
+variable N       index 16        # fcc unit cells per side  (Ni atoms = 4*N^3)
+variable T       index 300.0     # temperature (K)
+variable mu      index -2.4      # lattice-gas chemical potential (eV), ~plateau
+variable seed    index 12345
+variable nequil  index 1000      # equilibration MD steps (not timed)
+variable nmd     index 2000      # timed MD steps per phase
+variable nevery  index 20        # MC block every this many steps
+variable ntrials index 400       # trial flips per MC block
+variable potdir  index .         # dir holding ni_h_rcut4.90_rcut2.eam.alloy
+
+units           metal
+boundary        p p p
+atom_style      atomic
+
+lattice         fcc 3.52
+region          box block 0 ${N} 0 ${N} 0 ${N}
+create_box      2 box
+create_atoms    1 box            # all Ni to start; H is inserted by the MC fix
+mass            1 58.69          # Ni
+mass            2 1.008          # H
+
+pair_style      eam/alloy
+pair_coeff      * * ${potdir}/ni_h_rcut4.90_rcut2.eam.alloy Ni H
+
+velocity        all create ${T} ${seed} mom yes rot yes
+timestep        0.001
+
+# octahedral clearance window (validated: occupied sites vanish below rmin, so no
+# occupancy veto needed); wide enough for the H-expanded lattice (a up to ~3.74)
+compute         SITES all sites/voronoi rmerge 0.35 rmin 1.45 rmax 2.2
+
+# NPT so the box expands as H is charged in — the realistic H-in-Ni workflow
+fix             INT all npt temp ${T} ${T} 0.1 iso 0.0 0.0 1.0
+
+thermo          200
+thermo_style    custom step atoms temp pe press vol
+
+# --- Phase 0: equilibrate the pure-Ni MD (NOT timed) -----------------------
+run             ${nequil}
+
+# --- Phase A: pure MD baseline (TIMED -> loop time #1 after equil) ----------
+reset_timestep  0
+run             ${nmd}
+
+# --- Phase B: MD + MC (TIMED -> loop time #2 after equil) -------------------
+# H is type 2; Nevery=${nevery}, Ntrials=${ntrials}, MC temperature=${T}.
+fix             MC all mc/sites ${nevery} ${ntrials} 2 ${seed} ${T} sites c_SITES mode gc mu ${mu}
+thermo_style    custom step atoms temp pe press vol f_MC[4] f_MC[5] f_MC[6] f_MC[7]
+reset_timestep  0
+run             ${nmd}
+
+# --- machine-readable summary for the parser -------------------------------
+variable natt equal f_MC[1]
+variable nins equal f_MC[2]
+variable ndel equal f_MC[3]
+variable nH   equal f_MC[4]
+variable Msit equal f_MC[5]
+variable conc equal f_MC[6]
+variable acc  equal f_MC[7]
+variable ntot equal count(all)
+print "BENCH_RESULT ncell=${N} natoms=${ntot} nmd=${nmd} nevery=${nevery} ntrials=${ntrials} natt=${natt} nins=${nins} ndel=${ndel} nH=${nH} Msites=${Msit} conc=${conc} acc=${acc}"
