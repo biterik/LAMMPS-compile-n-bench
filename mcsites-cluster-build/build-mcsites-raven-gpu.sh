@@ -72,14 +72,17 @@ if [ ! -d "$SRC/.git" ]; then
 fi
 cd "$SRC"
 git fetch --all -q || true
-if git rev-parse -q --verify "$MCSITES_BRANCH" >/dev/null; then
+if git rev-parse -q --verify "$MCSITES_BRANCH" >/dev/null && \
+   git cat-file -e "$MCSITES_BRANCH:src/MC/fix_mc_sites.cpp" 2>/dev/null; then
     echo ">> reusing branch $MCSITES_BRANCH: $(git log -1 --format='%h %s' "$MCSITES_BRANCH")"
 else
-    echo ">> creating $MCSITES_BRANCH from $FORK_COMMIT and applying mc-sites patches"
+    echo ">> (re)creating $MCSITES_BRANCH from $FORK_COMMIT and applying mc-sites patches"
+    git am --abort 2>/dev/null || true
     git checkout -q "$FORK_COMMIT"
+    git branch -D "$MCSITES_BRANCH" 2>/dev/null || true
     git checkout -q -b "$MCSITES_BRANCH"
     [ -d "$PATCHES_DIR" ] || { echo "ERROR: PATCHES_DIR not found: $PATCHES_DIR" >&2; exit 1; }
-    git am "$PATCHES_DIR"/00*.patch
+    git -c user.email=mcsites@localhost -c user.name='mc-sites build' am "$PATCHES_DIR"/00*.patch
 fi
 git checkout -q "$MCSITES_BRANCH"
 echo ">> source at: $(git log -1 --format='%H %s')"
