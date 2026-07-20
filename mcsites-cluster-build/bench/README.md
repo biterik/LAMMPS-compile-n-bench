@@ -26,15 +26,26 @@ steps) and **Phase B** (MD + MC, `nmd` steps). The submit script reads the two
 "Loop time" values: `t_step = A/nmd`, and the MC cost is `B − A` spread over the
 recorded number of trials → `t_trial`. It then prints a ready-to-use estimator.
 
-## Important caveat — `fix mc/sites` on GPU (v1)
+## IMPORTANT — the MC half does NOT run under `-sf kk` (measured, v1)
 
-`fix mc/sites` has **no Kokkos variant** in v1: under `-sf kk` the MD and each MC
-trial's EAM energy eval run on the GPU (`eam/alloy/kk`), but the fix's create/delete
-bookkeeping runs on the **host**. On the MI300A that host access is cheap (unified
-memory / XNACK), but this GPU+MC combination is *not* part of the validated 43/43
-suite. **Always run the CPU cross-check** (`submit-mcmd-bench-viper-cpu.slurm`) once
-and confirm the final `conc N/M` and MC acceptance agree with the GPU run before you
-trust the GPU timings for production planning.
+Confirmed on Viper (MI300A): with `-sf kk`, `compute sites/voronoi` returns an
+**empty catalogue** (`Msites=0`, `natt=0`) — the MC half is a silent no-op and the
+"MD+MC" phase just measures MD again. Root cause: the compute reads coordinates via
+`atom->x` on the host with no Kokkos device sync, so under a Kokkos run it never sees
+the live (device) positions. This is the documented v1 limitation ("Not supported:
+Kokkos/GPU/INTEL suffix versions").
+
+Consequence: **the GPU accelerates only the MD.** Since each MC trial is a full
+energy evaluation and those dominate a hydrogen-charging run, the MC bottleneck runs
+on the host regardless — so the meaningful **MD+MC benchmark is the CPU one**
+(`submit-mcmd-bench-viper-cpu.slurm`, full 128-core node, fully supported). Use the
+GPU number only for the MD portion.
+
+Two ways to see real MC numbers:
+- **CPU benchmark** (recommended): build viper-cpu, run `submit-mcmd-bench-viper-cpu.slurm`.
+- **Host mode on the existing GPU binary** (quick proof it's the Kokkos path, not the
+  input): `sbatch --export=ALL,ACC=' ',NCELL=8,NMD=200,NTRIALS=50 submit-mcmd-bench-viper-gpu.slurm`
+  — with `ACC` empty the binary runs plain host EAM and you should see `Msites>0`, `natt>0`.
 
 ## Run it
 

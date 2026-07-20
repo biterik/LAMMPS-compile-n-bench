@@ -62,7 +62,14 @@ echo ">> binary : $LMP"
 echo ">> potdir : $POTDIR"
 echo ">> size   : ${NCELL}^3 fcc cells ($((4*NCELL*NCELL*NCELL)) Ni)  nmd=$NMD nevery=$NEVERY ntrials=$NTRIALS"
 
-srun "$LMP" -k on g 1 -sf kk -pk kokkos newton on neigh half \
+# Accelerator flags. Default = GPU via Kokkos/HIP. NOTE: fix mc/sites is NOT
+# Kokkos-aware in v1 (it reads atom->x on the host with no device sync), so under
+# `-sf kk` the site catalogue comes back EMPTY (Msites=0, natt=0) and the MC half
+# is a silent no-op. To run the MC path correctly on this same binary in host mode
+# (no GPU), pass an empty ACC:  sbatch --export=ALL,ACC=' ',NCELL=8,NMD=200 <script>
+ACC="${ACC:- -k on g 1 -sf kk -pk kokkos newton on neigh half}"
+
+srun "$LMP" $ACC \
      -in "$IN" -log "$LOG" \
      -var potdir "$POTDIR" -var pot "$POT" -var N "$NCELL" -var nmd "$NMD" -var nevery "$NEVERY" \
      -var ntrials "$NTRIALS" -var mu "$MU" -var T "$TEMP" -var seed "$SEED"
