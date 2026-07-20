@@ -37,17 +37,23 @@ module load gcc/14 rocm/6.3 openmpi_gpu/5.0     # match build-mcsites-viper-gpu.
 export OMP_NUM_THREADS=1
 export HSA_XNACK=1              # MI300A unified memory (HMM) needs XNACK on
 
-# --- inputs / knobs ---------------------------------------------------------
-POTDIR="${POTDIR:?set POTDIR=/path with ni_h_rcut4.90_rcut2.eam.alloy}"
+# ================= USER CONFIG — baked-in defaults, EDIT IF PATHS MOVE =========
+# MPCDF Viper does NOT forward the submit environment to the job, so
+# `POTDIR=... sbatch ...` silently fails. These hardcoded defaults make a bare
+#   sbatch submit-mcmd-bench-viper-gpu.slurm
+# work with NO environment variables. To override for one run, use --export, e.g.
+#   sbatch --export=ALL,NCELL=24,NTRIALS=200 submit-mcmd-bench-viper-gpu.slurm
+POTDIR="${POTDIR:-/viper/ptmp/biterik/POTENTIALS}"
+POT="${POT:-ni_h_rcut4.90_rcut2.eam.alloy}"
+LMP="${LMP:-/viper/ptmp2/biterik/LAMMPS-compile-n-bench/lammps-mcsites/build-mcsites-viper-gpu/lmp_mcsites_fork24da74_viper_gpu}"
+IN="${IN:-/viper/ptmp2/biterik/LAMMPS-compile-n-bench/mcsites-cluster-build/bench/in.mcmd_bench_nih}"
+# ==============================================================================
 HERE="${SLURM_SUBMIT_DIR:-$PWD}"
-IN="${IN:-$HERE/in.mcmd_bench_nih}"
-LMP="${LMP:-$HERE/lammps-mcsites/build-mcsites-viper-gpu/lmp_mcsites_fork24da74_viper_gpu}"
 LOG="${LOG:-$HERE/log.${SLURM_JOB_ID:-out}.mcmd_bench_viper_gpu}"
 
-# optional size/step overrides (forwarded to the input's -var)
+# optional size/step overrides (pass via --export=ALL,NCELL=...)
 NCELL="${NCELL:-16}"; NMD="${NMD:-2000}"; NEVERY="${NEVERY:-20}"
 NTRIALS="${NTRIALS:-400}"; MU="${MU:--2.4}"; TEMP="${TEMP:-300.0}"; SEED="${SEED:-12345}"
-POT="${POT:-ni_h_rcut4.90_rcut2.eam.alloy}"   # EAM file in POTDIR; override e.g. POT=NiAlH_jea.eam.alloy
 
 [ -x "$LMP" ] || { echo "ERROR: binary not found/executable: $LMP  (set LMP=/path/to/lmp_mcsites_fork24da74_viper_gpu)" >&2; exit 1; }
 [ -f "$POTDIR/$POT" ] || { echo "ERROR: potential not found: $POTDIR/$POT  (set POTDIR/POT correctly)" >&2; exit 1; }
