@@ -1,0 +1,120 @@
+From 34ae6f5e35a16186422a4f93cdae617ed7221927 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Tue, 21 Jul 2026 13:29:40 +0200
+Subject: [PATCH 7/9] Add compute sites/voronoi/kk: sync device atoms to host
+ before tessellation
+
+Kokkos-aware subclass selected by -sf kk.  The tessellation, clustering
+and site criteria stay on the host (Voro++ is a serial CPU library); the
+subclass only pulls live positions/type/mask/tag off the device with
+atomKK->sync(Host, ...) before the host reads them.  Fixes the empty
+catalogue (Msites=0) seen under -sf kk on devices with separate memory.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0183gtTmwDnCVQWCaTxG4HPQ
+---
+ src/KOKKOS/compute_sites_voronoi_kokkos.cpp | 46 +++++++++++++++++++++
+ src/KOKKOS/compute_sites_voronoi_kokkos.h   | 38 +++++++++++++++++
+ 2 files changed, 84 insertions(+)
+ create mode 100644 src/KOKKOS/compute_sites_voronoi_kokkos.cpp
+ create mode 100644 src/KOKKOS/compute_sites_voronoi_kokkos.h
+
+diff --git a/src/KOKKOS/compute_sites_voronoi_kokkos.cpp b/src/KOKKOS/compute_sites_voronoi_kokkos.cpp
+new file mode 100644
+index 0000000..0376a3b
+--- /dev/null
++++ b/src/KOKKOS/compute_sites_voronoi_kokkos.cpp
+@@ -0,0 +1,46 @@
++/* ----------------------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++/* ----------------------------------------------------------------------
++   Contributing author: Erik Bitzek (erik.bitzek@googlemail.com)
++------------------------------------------------------------------------- */
++
++#include "compute_sites_voronoi_kokkos.h"
++
++#include "atom_kokkos.h"
++#include "atom_masks.h"
++
++using namespace LAMMPS_NS;
++
++/* ---------------------------------------------------------------------- */
++
++ComputeSitesVoronoiKokkos::ComputeSitesVoronoiKokkos(LAMMPS *lmp, int narg, char **arg) :
++    ComputeSitesVoronoi(lmp, narg, arg)
++{
++  kokkosable = 1;
++  execution_space = Host;
++  datamask_read = EMPTY_MASK;
++  datamask_modify = EMPTY_MASK;
++}
++
++/* ----------------------------------------------------------------------
++   the tessellation, clustering and all site criteria run on the host
++   (Voro++ is a serial CPU library); the only Kokkos-specific step is
++   pulling the live atom data off the device before the host reads it
++------------------------------------------------------------------------- */
++
++void ComputeSitesVoronoiKokkos::compute_local()
++{
++  atomKK->sync(Host, X_MASK | TYPE_MASK | MASK_MASK | TAG_MASK);
++  ComputeSitesVoronoi::compute_local();
++}
+diff --git a/src/KOKKOS/compute_sites_voronoi_kokkos.h b/src/KOKKOS/compute_sites_voronoi_kokkos.h
+new file mode 100644
+index 0000000..3dd90dc
+--- /dev/null
++++ b/src/KOKKOS/compute_sites_voronoi_kokkos.h
+@@ -0,0 +1,38 @@
++/* -*- c++ -*- ----------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++#ifdef COMPUTE_CLASS
++// clang-format off
++ComputeStyle(sites/voronoi/kk,ComputeSitesVoronoiKokkos);
++ComputeStyle(sites/voronoi/kk/device,ComputeSitesVoronoiKokkos);
++ComputeStyle(sites/voronoi/kk/host,ComputeSitesVoronoiKokkos);
++// clang-format on
++#else
++
++#ifndef LMP_COMPUTE_SITES_VORONOI_KOKKOS_H
++#define LMP_COMPUTE_SITES_VORONOI_KOKKOS_H
++
++#include "compute_sites_voronoi.h"
++
++namespace LAMMPS_NS {
++
++class ComputeSitesVoronoiKokkos : public ComputeSitesVoronoi {
++ public:
++  ComputeSitesVoronoiKokkos(class LAMMPS *, int, char **);
++  void compute_local() override;
++};
++
++}    // namespace LAMMPS_NS
++
++#endif
++#endif
+-- 
+2.55.0
+

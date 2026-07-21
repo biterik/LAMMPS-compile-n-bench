@@ -1,9 +1,10 @@
 #!/bin/bash
 # ===========================================================================
 # Run a LAMMPS + MC-SITES job on VIPER-GPU (1x AMD MI300A APU).
-# MD/pair styles run on the GPU via Kokkos/HIP (-sf kk). NOTE: fix mc/sites has
-# no Kokkos variant (v1) — its create/delete bookkeeping runs host-side and calls
-# the (GPU-accelerated) pair style for each trial energy. Expected behaviour.
+# MD/pair styles run on the GPU via Kokkos/HIP (-sf kk). With patches 0006-0009,
+# -sf kk selects fix mc/sites/kk + compute sites/voronoi/kk: MC bookkeeping stays
+# host-side (by design) with explicit device<->host syncs; each trial energy runs
+# through the GPU pair style on the MI300A.
 #
 # 'apudev' caps at 15 min — size your run to fit, or switch to -p gpu for longer.
 #

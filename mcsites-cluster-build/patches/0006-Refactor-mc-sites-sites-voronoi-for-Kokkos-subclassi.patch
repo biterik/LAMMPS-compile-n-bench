@@ -1,0 +1,183 @@
+From cfb6b27a485c4100358493416ca99eda8a3822f0 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Tue, 21 Jul 2026 13:29:32 +0200
+Subject: [PATCH 6/9] Refactor mc/sites + sites/voronoi for Kokkos subclassing
+ (no behavior change)
+
+Make the methods a /kk subclass must wrap virtual and protected
+(build_catalog, attempt_insertion, attempt_deletion, run_source_mode,
+energy_full; the compute's members), and add two no-op coherence hooks:
+sync_atoms_host() before every host read or in-place host edit of atom
+arrays, mark_atoms_modified() after every host-side change to the atom
+set (insert / delete / restore / velocities / forces / tags / nlocal).
+Hooks are empty in the base class; the non-kk path is unchanged (full
+test suite re-run green on a plain build).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0183gtTmwDnCVQWCaTxG4HPQ
+---
+ src/MC/fix_mc_sites.cpp             | 20 +++++++++++++++++++-
+ src/MC/fix_mc_sites.h               | 19 +++++++++++++------
+ src/VORONOI/compute_sites_voronoi.h |  2 +-
+ 3 files changed, 33 insertions(+), 8 deletions(-)
+
+diff --git a/src/MC/fix_mc_sites.cpp b/src/MC/fix_mc_sites.cpp
+index 150d0cd..56f32d1 100644
+--- a/src/MC/fix_mc_sites.cpp
++++ b/src/MC/fix_mc_sites.cpp
+@@ -564,6 +564,8 @@ void FixMCSites::pre_exchange()
+   if (modify->n_pre_neighbor) modify->pre_neighbor();
+   neighbor->build(1);
+ 
++  sync_atoms_host();
++
+   build_catalog();
+ 
+   if (ncatalog == 0) {
+@@ -685,6 +687,7 @@ void FixMCSites::attempt_insertion(int idx)
+   double coord[3] = {catalog[idx].x[0], catalog[idx].x[1], catalog[idx].x[2]};
+   int proc_flag = site_owner_flag(coord);
+ 
++  sync_atoms_host();
+   if (proc_flag) {
+     atom->avec->create_atom(mcs_type, coord);
+     int m = atom->nlocal - 1;
+@@ -698,6 +701,7 @@ void FixMCSites::attempt_insertion(int idx)
+ 
+   atom->natoms++;
+   atom->tag_extend();
++  mark_atoms_modified();
+   atom->map_init();
+   atom->nghost = 0;
+   if (triclinic) domain->x2lamda(atom->nlocal);
+@@ -718,6 +722,7 @@ void FixMCSites::attempt_insertion(int idx)
+   } else {
+     atom->natoms--;
+     if (proc_flag) atom->nlocal--;
++    mark_atoms_modified();
+     if (force->kspace) force->kspace->qsum_qsq();
+     if (force->pair->tail_flag) force->pair->reinit();
+     energy_stored = energy_before;
+@@ -743,6 +748,7 @@ void FixMCSites::attempt_deletion(int idx)
+   int m = atom->map(dtag);
+   int proc_flag = (m >= 0 && m < atom->nlocal);
+ 
++  sync_atoms_host();
+   if (proc_flag) {
+     // buffer sized like Comm::init_exchange: avec extra + fix extras + slack
+     // (the base per-atom pack of ~11 doubles is well inside the slack)
+@@ -758,6 +764,7 @@ void FixMCSites::attempt_deletion(int idx)
+     atom->nlocal--;
+   }
+   atom->natoms--;
++  mark_atoms_modified();
+   atom->map_init();
+   atom->nghost = 0;
+   if (triclinic) domain->x2lamda(atom->nlocal);
+@@ -777,6 +784,7 @@ void FixMCSites::attempt_deletion(int idx)
+   } else {
+     if (proc_flag) atom->avec->unpack_exchange(exchbuf);    // increments nlocal
+     atom->natoms++;
++    mark_atoms_modified();
+     atom->map_init();
+     atom->nghost = 0;
+     if (triclinic) domain->x2lamda(atom->nlocal);
+@@ -839,6 +847,7 @@ void FixMCSites::run_source_mode()
+     double coord[3] = {catalog[idx].x[0], catalog[idx].x[1], catalog[idx].x[2]};
+     int proc_flag = site_owner_flag(coord);
+ 
++    sync_atoms_host();
+     if (proc_flag) {
+       atom->avec->create_atom(mcs_type, coord);
+       int m = atom->nlocal - 1;
+@@ -852,6 +861,7 @@ void FixMCSites::run_source_mode()
+ 
+     atom->natoms++;
+     atom->tag_extend();
++    mark_atoms_modified();
+     atom->map_init();
+     atom->nghost = 0;
+     if (triclinic) domain->x2lamda(atom->nlocal);
+@@ -893,8 +903,10 @@ double FixMCSites::energy_full()
+ 
+   // zero forces: they accumulate across repeated evaluations in one step
+ 
++  sync_atoms_host();
+   size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
+   if (nbytes) memset(&atom->f[0][0], 0, 3 * nbytes);
++  mark_atoms_modified();
+ 
+   if (modify->n_pre_force) modify->pre_force(vflag);
+   if (force->pair) force->pair->compute(eflag, vflag);
+@@ -908,7 +920,13 @@ double FixMCSites::energy_full()
+   if (modify->n_post_force_any) modify->post_force(vflag);
+ 
+   update->eflag_global = update->ntimestep;
+-  return c_pe->compute_scalar();
++  double energy = c_pe->compute_scalar();
++
++  // leave the host copy of the atom data current for the caller's next
++  // host-side trial mechanics
++
++  sync_atoms_host();
++  return energy;
+ }
+ 
+ /* ---------------------------------------------------------------------- */
+diff --git a/src/MC/fix_mc_sites.h b/src/MC/fix_mc_sites.h
+index 783cafb..94eb9b6 100644
+--- a/src/MC/fix_mc_sites.h
++++ b/src/MC/fix_mc_sites.h
+@@ -38,7 +38,7 @@ class FixMCSites : public Fix {
+ 
+   int species_type() const { return mcs_type; }
+ 
+- private:
++ protected:
+   // one frozen-catalogue entry: empty site (tag 0) or species atom (tag > 0)
+   struct SiteEntry {
+     double x[3];
+@@ -95,15 +95,22 @@ class FixMCSites : public Fix {
+   double nspecies_out, ncatalog_out;
+   int nblocks_offband;    // consecutive blocks with acceptance out of [0.01,0.99]
+ 
+-  void build_catalog();
++  virtual void build_catalog();
+   void catalog_append(const double *xyz, double clearance, tagint tag);
+   void read_sites_file();
+-  void attempt_insertion(int);
+-  void attempt_deletion(int);
+-  void run_source_mode();
+-  double energy_full();
++  virtual void attempt_insertion(int);
++  virtual void attempt_deletion(int);
++  virtual void run_source_mode();
++  virtual double energy_full();
+   int site_owner_flag(double *);
+   tagint global_new_tag(int);
++
++  // device<->host coherence hooks for the Kokkos subclass: no-ops here.
++  // sync_atoms_host() runs before any host read or in-place host edit of
++  // atom arrays; mark_atoms_modified() runs after host code has changed
++  // atoms (insert / delete / velocities / forces / nlocal / tags)
++  virtual void sync_atoms_host() {}
++  virtual void mark_atoms_modified() {}
+ };
+ 
+ }    // namespace LAMMPS_NS
+diff --git a/src/VORONOI/compute_sites_voronoi.h b/src/VORONOI/compute_sites_voronoi.h
+index 0889f84..f897c8f 100644
+--- a/src/VORONOI/compute_sites_voronoi.h
++++ b/src/VORONOI/compute_sites_voronoi.h
+@@ -33,7 +33,7 @@ class ComputeSitesVoronoi : public Compute {
+   double compute_scalar() override;
+   double memory_usage() override;
+ 
+- private:
++ protected:
+   double rmerge;        // vertex merge (clustering) distance
+   double rmin, rmax;    // clearance window (empty-sphere radius)
+   double vmin, vmax;    // probe Voronoi volume window
+-- 
+2.55.0
+

@@ -5,8 +5,8 @@
 # estimate the wall time of a production MD+MC run on one GPU.
 #
 # The MD (and each MC trial's EAM energy eval) run on the GPU via -sf kk.
-# fix mc/sites itself has no Kokkos variant (v1) — its create/delete bookkeeping
-# runs on the host; on the MI300A that host access is cheap (unified memory).
+# With patches 0006-0009, -sf kk selects fix mc/sites/kk: MC bookkeeping stays
+# host-side (by design) with explicit device<->host syncs around each trial.
 #
 # Requires a Ni/H EAM potential. Point POTDIR at the dir holding
 #   ni_h_rcut4.90_rcut2.eam.alloy
