@@ -1,10 +1,10 @@
 #!/bin/bash
 # ===========================================================================
 # Run a LAMMPS + MC-SITES job on RAVEN-GPU (1x NVIDIA A100).
-# The MD/pair styles run on the GPU via Kokkos/CUDA (-sf kk). NOTE: fix mc/sites
-# has no Kokkos variant (v1) — it runs its create/delete bookkeeping on the host
-# and calls the (GPU-accelerated) pair style for each trial energy. That is
-# expected; the pair evaluation is still on the A100.
+# The MD/pair styles run on the GPU via Kokkos/CUDA (-sf kk). With patches
+# 0006-0009, -sf kk selects fix mc/sites/kk + compute sites/voronoi/kk: the MC
+# bookkeeping stays on the host (by design) with explicit device<->host syncs,
+# and each trial energy runs through the GPU pair style on the A100.
 #
 # 'gpudev' caps at 15 min — size your run to fit, or use the regular 'gpu' partition.
 #

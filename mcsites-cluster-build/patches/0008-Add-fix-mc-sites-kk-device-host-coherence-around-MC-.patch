@@ -1,0 +1,165 @@
+From edb8694ca4936f8a23b4ebc2c4faccf0649f7350 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Tue, 21 Jul 2026 13:32:10 +0200
+Subject: [PATCH 8/9] Add fix mc/sites/kk: device<->host coherence around MC
+ trial mechanics
+
+Kokkos-aware subclass selected by -sf kk.  MC bookkeeping stays on the
+host; the subclass implements the base-class hooks as
+atomKK->sync(Host, ALL_MASK) / atomKK->modified(Host, ALL_MASK) so the
+device rebuilds its atom set before each per-trial full-energy
+evaluation (which runs through the Kokkos pair styles) and the host
+sees current data after it.  Also register both /kk files in the
+legacy-make Install.sh, conditional on their base-package files.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0183gtTmwDnCVQWCaTxG4HPQ
+---
+ src/KOKKOS/Install.sh              |  4 ++
+ src/KOKKOS/fix_mc_sites_kokkos.cpp | 63 ++++++++++++++++++++++++++++++
+ src/KOKKOS/fix_mc_sites_kokkos.h   | 41 +++++++++++++++++++
+ 3 files changed, 108 insertions(+)
+ create mode 100644 src/KOKKOS/fix_mc_sites_kokkos.cpp
+ create mode 100644 src/KOKKOS/fix_mc_sites_kokkos.h
+
+diff --git a/src/KOKKOS/Install.sh b/src/KOKKOS/Install.sh
+index c1888d4..08ba7d4 100755
+--- a/src/KOKKOS/Install.sh
++++ b/src/KOKKOS/Install.sh
+@@ -99,6 +99,8 @@ action compute_composition_atom_kokkos.cpp compute_composition_atom.cpp
+ action compute_composition_atom_kokkos.h compute_composition_atom.h
+ action compute_orientorder_atom_kokkos.cpp
+ action compute_orientorder_atom_kokkos.h
++action compute_sites_voronoi_kokkos.cpp compute_sites_voronoi.cpp
++action compute_sites_voronoi_kokkos.h compute_sites_voronoi.h
+ action compute_sna_grid_kokkos.cpp compute_sna_grid.cpp
+ action compute_sna_grid_kokkos.h compute_sna_grid.h
+ action compute_sna_grid_kokkos_impl.h compute_sna_grid.cpp
+@@ -166,6 +168,8 @@ action fix_gravity_kokkos.cpp
+ action fix_gravity_kokkos.h
+ action fix_langevin_kokkos.cpp
+ action fix_langevin_kokkos.h
++action fix_mc_sites_kokkos.cpp fix_mc_sites.cpp
++action fix_mc_sites_kokkos.h fix_mc_sites.h
+ action fix_minimize_kokkos.cpp
+ action fix_minimize_kokkos.h
+ action fix_momentum_kokkos.cpp
+diff --git a/src/KOKKOS/fix_mc_sites_kokkos.cpp b/src/KOKKOS/fix_mc_sites_kokkos.cpp
+new file mode 100644
+index 0000000..0f474da
+--- /dev/null
++++ b/src/KOKKOS/fix_mc_sites_kokkos.cpp
+@@ -0,0 +1,63 @@
++/* ----------------------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++/* ----------------------------------------------------------------------
++   Contributing author: Erik Bitzek (erik.bitzek@googlemail.com)
++
++   Kokkos-aware variant of fix mc/sites.  The MC bookkeeping (catalogue,
++   proposals, acceptance) is inherently serial and stays on the host; the
++   per-trial full energy evaluations run through the Kokkos pair styles
++   on the device.  All this subclass adds are the device<->host coherence
++   points: the base class calls sync_atoms_host() before every host read
++   of atom arrays and mark_atoms_modified() after every host-side change
++   (insert / delete / restore / velocities / forces / tags / nlocal), so
++   the device rebuilds its atom set before each energy evaluation.
++------------------------------------------------------------------------- */
++
++#include "fix_mc_sites_kokkos.h"
++
++#include "atom_kokkos.h"
++#include "atom_masks.h"
++
++using namespace LAMMPS_NS;
++
++/* ---------------------------------------------------------------------- */
++
++FixMCSitesKokkos::FixMCSitesKokkos(LAMMPS *lmp, int narg, char **arg) : FixMCSites(lmp, narg, arg)
++{
++  kokkosable = 1;
++  execution_space = Host;
++  datamask_read = EMPTY_MASK;
++  datamask_modify = EMPTY_MASK;
++}
++
++/* ----------------------------------------------------------------------
++   pull everything the host-side MC mechanics may read (positions, types,
++   masks, tags, velocities, forces, images, charges) off the device; a
++   full-mask sync is cheap when nothing is stale and correct everywhere
++------------------------------------------------------------------------- */
++
++void FixMCSitesKokkos::sync_atoms_host()
++{
++  atomKK->sync(Host, ALL_MASK);
++}
++
++/* ----------------------------------------------------------------------
++   tell the device the host changed the atom set; the next Kokkos consumer
++   (comm, neighbor build, pair compute) re-syncs before it runs
++------------------------------------------------------------------------- */
++
++void FixMCSitesKokkos::mark_atoms_modified()
++{
++  atomKK->modified(Host, ALL_MASK);
++}
+diff --git a/src/KOKKOS/fix_mc_sites_kokkos.h b/src/KOKKOS/fix_mc_sites_kokkos.h
+new file mode 100644
+index 0000000..9fe80a6
+--- /dev/null
++++ b/src/KOKKOS/fix_mc_sites_kokkos.h
+@@ -0,0 +1,41 @@
++/* -*- c++ -*- ----------------------------------------------------------
++   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
++   https://www.lammps.org/, Sandia National Laboratories
++   LAMMPS development team: developers@lammps.org
++
++   Copyright (2003) Sandia Corporation.  Under the terms of Contract
++   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
++   certain rights in this software.  This software is distributed under
++   the GNU General Public License.
++
++   See the README file in the top-level LAMMPS directory.
++------------------------------------------------------------------------- */
++
++#ifdef FIX_CLASS
++// clang-format off
++FixStyle(mc/sites/kk,FixMCSitesKokkos);
++FixStyle(mc/sites/kk/device,FixMCSitesKokkos);
++FixStyle(mc/sites/kk/host,FixMCSitesKokkos);
++// clang-format on
++#else
++
++#ifndef LMP_FIX_MC_SITES_KOKKOS_H
++#define LMP_FIX_MC_SITES_KOKKOS_H
++
++#include "fix_mc_sites.h"
++
++namespace LAMMPS_NS {
++
++class FixMCSitesKokkos : public FixMCSites {
++ public:
++  FixMCSitesKokkos(class LAMMPS *, int, char **);
++
++ protected:
++  void sync_atoms_host() override;
++  void mark_atoms_modified() override;
++};
++
++}    // namespace LAMMPS_NS
++
++#endif
++#endif
+-- 
+2.55.0
+

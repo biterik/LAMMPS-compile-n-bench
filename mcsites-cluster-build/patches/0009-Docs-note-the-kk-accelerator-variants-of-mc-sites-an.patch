@@ -1,0 +1,101 @@
+From a09ddc17e566c681f7e13e18bd0c23c573bc0b51 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Tue, 21 Jul 2026 13:32:14 +0200
+Subject: [PATCH 9/9] Docs: note the /kk accelerator variants of mc/sites and
+ sites/voronoi
+
+Add the standard Accelerator Variants headers, accel_styles.rst
+includes, index entries, and (k) markers in the command tables.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0183gtTmwDnCVQWCaTxG4HPQ
+---
+ doc/src/Commands_compute.rst      | 2 +-
+ doc/src/Commands_fix.rst          | 2 +-
+ doc/src/compute_sites_voronoi.rst | 7 +++++++
+ doc/src/fix_mc_sites.rst          | 7 +++++++
+ 4 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/doc/src/Commands_compute.rst b/doc/src/Commands_compute.rst
+index 1a133df..26df366 100644
+--- a/doc/src/Commands_compute.rst
++++ b/doc/src/Commands_compute.rst
+@@ -117,7 +117,7 @@ KOKKOS, o = OPENMP, t = OPT.
+    * :doc:`rheo/property/atom <compute_rheo_property_atom>`
+    * :doc:`rigid/local <compute_rigid_local>`
+    * :doc:`saed <compute_saed>`
+-   * :doc:`sites/voronoi <compute_sites_voronoi>`
++   * :doc:`sites/voronoi (k) <compute_sites_voronoi>`
+    * :doc:`slcsa/atom <compute_slcsa_atom>`
+    * :doc:`slice <compute_slice>`
+    * :doc:`smd/contact/radius <compute_smd_contact_radius>`
+diff --git a/doc/src/Commands_fix.rst b/doc/src/Commands_fix.rst
+index 46650b0..992dab4 100644
+--- a/doc/src/Commands_fix.rst
++++ b/doc/src/Commands_fix.rst
+@@ -112,7 +112,7 @@ OPT.
+    * :doc:`lb/viscous <fix_lb_viscous>`
+    * :doc:`lineforce <fix_lineforce>`
+    * :doc:`manifoldforce <fix_manifoldforce>`
+-   * :doc:`mc/sites <fix_mc_sites>`
++   * :doc:`mc/sites (k) <fix_mc_sites>`
+    * :doc:`mdi/qm <fix_mdi_qm>`
+    * :doc:`mdi/qmmm <fix_mdi_qmmm>`
+    * :doc:`meso/move <fix_meso_move>`
+diff --git a/doc/src/compute_sites_voronoi.rst b/doc/src/compute_sites_voronoi.rst
+index 5799ca4..d7cb499 100644
+--- a/doc/src/compute_sites_voronoi.rst
++++ b/doc/src/compute_sites_voronoi.rst
+@@ -1,8 +1,11 @@
+ .. index:: compute sites/voronoi
++.. index:: compute sites/voronoi/kk
+ 
+ compute sites/voronoi command
+ =============================
+ 
++Accelerator Variants: *sites/voronoi/kk*
++
+ Syntax
+ """"""
+ 
+@@ -121,6 +124,10 @@ from a compute as input, e.g. :doc:`dump local <dump>` or
+ :doc:`units <units>`, the clearance in distance units, the volume in
+ volume units.
+ 
++----------
++
++.. include:: accel_styles.rst
++
+ Restrictions
+ """"""""""""
+ 
+diff --git a/doc/src/fix_mc_sites.rst b/doc/src/fix_mc_sites.rst
+index 6516edc..e6be41b 100644
+--- a/doc/src/fix_mc_sites.rst
++++ b/doc/src/fix_mc_sites.rst
+@@ -1,8 +1,11 @@
+ .. index:: fix mc/sites
++.. index:: fix mc/sites/kk
+ 
+ fix mc/sites command
+ ====================
+ 
++Accelerator Variants: *mc/sites/kk*
++
+ Syntax
+ """"""
+ 
+@@ -143,6 +146,10 @@ type are rejected.
+    evaluation computes (and discards) forces, exactly like
+    :doc:`fix gcmc <fix_gcmc>`.
+ 
++----------
++
++.. include:: accel_styles.rst
++
+ Restart, fix_modify, output, run start/stop, minimize info
+ """"""""""""""""""""""""""""""""""""""""""""""""""""""""""
+ 
+-- 
+2.55.0
+

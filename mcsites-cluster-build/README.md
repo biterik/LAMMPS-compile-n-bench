@@ -151,10 +151,12 @@ IN=in.h_charging sbatch submit-mcsites-viper-cpu.slurm
   bookkeeping in `fix mc/sites` is serial on rank 0; the per-trial **energy
   evaluations are MPI-parallel** across all ranks.
 - **GPU (raven-gpu, viper-gpu):** MD/pair styles run on the device via `-sf kk`.
-  `fix mc/sites` has **no Kokkos variant (v1)**, so it runs its create/delete
-  bookkeeping host-side and calls the GPU-accelerated pair style for each trial
-  energy — expected, and still uses the GPU for the heavy pair work. (viper-gpu also
-  exports `HSA_XNACK=1`, required for the MI300A's unified memory.)
+  With patches 0006-0009 the suffix selects `fix mc/sites/kk` +
+  `compute sites/voronoi/kk`: the create/delete bookkeeping stays host-side (by
+  design — Voro++ and the MC mechanics are serial) with explicit device<->host
+  `sync`/`modified` calls, and each trial energy runs through the GPU-accelerated
+  pair style. (viper-gpu also exports `HSA_XNACK=1`, required for the MI300A's
+  unified memory.)
 
 ---
 

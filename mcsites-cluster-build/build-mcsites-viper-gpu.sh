@@ -5,8 +5,9 @@
 # KOKKOS + HIP, arch gfx942 (APU variant).
 #
 # Full compile-n-bench package set + MC-SITES (PKG_MC + PKG_ML-PACE + PKG_VORONOI).
-# ML-UF3 stays OFF on HIP (illegal cross-memory-space ScatterView copy). fix mc/sites
-# has no Kokkos variant (v1) — its bookkeeping runs host-side while pair/MD use the GPU.
+# ML-UF3 stays OFF on HIP (illegal cross-memory-space ScatterView copy). with patches 0006-0009, -sf kk selects fix mc/sites/kk +
+# compute sites/voronoi/kk: MC bookkeeping stays host-side (by design) with
+# explicit device<->host syncs; MD and each trial energy run on the GPU.
 #
 # Binary:  lmp_mcsites_fork24da74_viper_gpu
 #
@@ -60,7 +61,7 @@ fi
 cd "$SRC"
 git fetch --all -q || true
 if git rev-parse -q --verify "$MCSITES_BRANCH" >/dev/null && \
-   git cat-file -e "$MCSITES_BRANCH:src/MC/fix_mc_sites.cpp" 2>/dev/null; then
+   git cat-file -e "$MCSITES_BRANCH:src/KOKKOS/fix_mc_sites_kokkos.cpp" 2>/dev/null; then
     echo ">> reusing branch $MCSITES_BRANCH: $(git log -1 --format='%h %s' "$MCSITES_BRANCH")"
 else
     echo ">> (re)creating $MCSITES_BRANCH from $FORK_COMMIT and applying mc-sites patches"
