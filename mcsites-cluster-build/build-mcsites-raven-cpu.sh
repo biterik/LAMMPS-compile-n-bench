@@ -19,6 +19,8 @@
 # ===========================================================================
 
 INTEL_VER="${INTEL_VER:-2025.3}"   # oneAPI compilers (icpx/icx)
+GCC_VER="${GCC_VER:-13}"           # GNU toolchain for icpx's C++ stdlib (<filesystem> needs >= GCC 8;
+                                   # without this icpx falls back to the ancient system libstdc++)
 IMPI_VER="${IMPI_VER:-2021.17}"    # Intel MPI (hierarchical, under intel/2025.3)
 MKL_VER="${MKL_VER:-2025.3}"       # BLAS/LAPACK + FFT
 CMAKE_VER="${CMAKE_VER:-3.30}"
@@ -39,6 +41,7 @@ if ! command -v module >/dev/null 2>&1; then
 fi
 
 module purge
+module load gcc/${GCC_VER}
 module load intel/${INTEL_VER}
 module load impi/${IMPI_VER}
 module load mkl/${MKL_VER}
@@ -51,6 +54,11 @@ set -euo pipefail
 
 export I_MPI_CXX=icpx
 export I_MPI_CC=icx
+
+# pin icpx to the gcc module's toolchain (headers + libstdc++), not the system one
+GCC_TOOLCHAIN="$(dirname "$(dirname "$(command -v gcc)")")"
+[ -x "$GCC_TOOLCHAIN/bin/g++" ] || { echo "ERROR: gcc/${GCC_VER} module gave no usable toolchain" >&2; exit 1; }
+echo ">> icpx --gcc-toolchain=$GCC_TOOLCHAIN ($(gcc -dumpversion))"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_DIR="$(pwd)"
@@ -130,7 +138,7 @@ cmake -S "$SRC/cmake" -B "$BUILD" \
     -D LAMMPS_MACHINE=mcsites_fork24da74_raven_cpu \
     -D CMAKE_C_COMPILER="$MPICC" \
     -D CMAKE_CXX_COMPILER="$MPICXX" \
-    -D CMAKE_CXX_FLAGS="-O3 -xCORE-AVX512 -qopt-zmm-usage=high" \
+    -D CMAKE_CXX_FLAGS="--gcc-toolchain=$GCC_TOOLCHAIN -O3 -xCORE-AVX512 -qopt-zmm-usage=high" \
     -D PKG_INTEL=on -D INTEL_ARCH=cpu \
     -D PKG_OPENMP=on -D PKG_OPT=on \
     -D PKG_MC=on -D PKG_ML-PACE=on -D PKG_VORONOI=on \
