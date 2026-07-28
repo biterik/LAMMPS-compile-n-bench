@@ -6,6 +6,14 @@ hardening). v1.0 = patches 0001-0009 (2026-07-21, Kokkos port) — the series
 the 2026-07-27 viper binaries were built from. Git tags `mc-sites-v1.0` /
 `mc-sites-v1.1` on the lammps branch mark the exact states.
 
+**GPU status: NOT yet validated.** The `/kk` styles build and pass the CPU
+test suite (Kokkos Serial), and CPU-side MPI is qualified up to 256 ranks
+(cmmg rank scan, 2026-07-28, all `check` verifications green), but the GPU
+path is unproven: the hipcc-built MI300A binary shows an unresolved
+acceptance discrepancy vs every CPU build, and the A100 (discrete-memory)
+sign-off is pending raven. Use the plain CPU styles for production; treat
+`-sf kk` as experimental.
+
 Build LAMMPS with the **full compile-n-bench package set** *plus* the **MC-SITES**
 contribution (`compute sites/voronoi` + `fix mc/sites`), on the five MPCDF targets:
 **cmmg, raven-gpu, raven-cpu, viper-cpu, viper-gpu**. Produces one uniquely-named
