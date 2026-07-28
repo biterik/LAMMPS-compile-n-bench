@@ -43,7 +43,9 @@ export HSA_XNACK=1              # MI300A unified memory (HMM) needs XNACK on
 #   sbatch submit-mcmd-bench-viper-gpu.slurm
 # work with NO environment variables. To override for one run, use --export, e.g.
 #   sbatch --export=ALL,NCELL=24,NTRIALS=200 submit-mcmd-bench-viper-gpu.slurm
-POTDIR="${POTDIR:-/viper/ptmp/biterik/POTENTIALS}"
+# SIDE-LOCAL RULE (MPCDF docs: compute nodes cannot access the other
+# system's filesystems): GPU jobs use ptmp2 paths ONLY. Viper-GPU: /ptmp -> /viper/ptmp2.
+POTDIR="${POTDIR:-/viper/ptmp2/biterik/POTENTIALS}"
 POT="${POT:-ni_h_rcut4.90_rcut2.eam.alloy}"
 LMP="${LMP:-/viper/ptmp2/biterik/LAMMPS-compile-n-bench/lammps-mcsites/build-mcsites-viper-gpu/lmp_mcsites_fork24da74_viper_gpu}"
 IN="${IN:-/viper/ptmp2/biterik/LAMMPS-compile-n-bench/mcsites-cluster-build/bench/in.mcmd_bench_nih}"
@@ -62,11 +64,11 @@ echo ">> binary : $LMP"
 echo ">> potdir : $POTDIR"
 echo ">> size   : ${NCELL}^3 fcc cells ($((4*NCELL*NCELL*NCELL)) Ni)  nmd=$NMD nevery=$NEVERY ntrials=$NTRIALS"
 
-# Accelerator flags. Default = GPU via Kokkos/HIP. NOTE: fix mc/sites is NOT
-# Kokkos-aware in v1 (it reads atom->x on the host with no device sync), so under
-# `-sf kk` the site catalogue comes back EMPTY (Msites=0, natt=0) and the MC half
-# is a silent no-op. To run the MC path correctly on this same binary in host mode
-# (no GPU), pass an empty ACC:  sbatch --export=ALL,ACC=' ',NCELL=8,NMD=200 <script>
+# Accelerator flags. Default = GPU via Kokkos/HIP; with patches 0006-0009 the
+# -sf kk suffix selects fix mc/sites/kk + compute sites/voronoi/kk (validated on
+# MI300A 2026-07-27: Msites>0, natt>0, sensible accept/reject). To run the same
+# binary in plain host mode (no GPU) for A/B checks, pass an empty ACC:
+#   sbatch --export=ALL,ACC=' ',NCELL=8,NMD=200 <script>
 ACC="${ACC:- -k on g 1 -sf kk -pk kokkos newton on neigh half}"
 
 srun "$LMP" $ACC \

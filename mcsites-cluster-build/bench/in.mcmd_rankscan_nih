@@ -1,4 +1,12 @@
 # ===========================================================================
+# RANK-SCAN variant of in.mcmd_bench_nih — identical recipe, two additions:
+#   * fix mc/sites runs with `check ${check}` (default yes): per-block
+#     state-consistency verification (atom count, species accounting,
+#     Metropolis reference energy). Requires the 10-patch series (patch 0010);
+#     a 9-patch binary rejects the keyword — that is the freshness check.
+#   * intended to be driven at several MPI rank counts with everything else
+#     fixed (same seed), to decide whether MC acceptance depends on the rank
+#     count (viper 8B criterion-7 investigation, 2026-07-27/28).
 # MD + MC (fix mc/sites) benchmark — EAM Ni/H, hydrogen charging of fcc Ni.
 # Goal: measure, on one GPU, (a) the cost of a plain MD step and (b) the cost of
 # one MC trial (a full EAM energy evaluation), so a production run of
@@ -26,6 +34,7 @@ variable nevery  index 20        # MC block every this many steps
 variable ntrials index 400       # trial flips per MC block
 variable potdir  index .         # dir holding the EAM potential file
 variable pot     index ni_h_rcut4.90_rcut2.eam.alloy   # EAM Ni/H file name (override with -var pot)
+variable check   index yes       # per-block consistency verification (patch 0010)
 
 units           metal
 boundary        p p p
@@ -71,7 +80,7 @@ run             ${nmd}
 # first left the first block scheduled at step nmd+1, one step past the end of
 # the run, so no MC block ever fired (Msites=0, natt=0, 0 neighbor builds).
 reset_timestep  0
-fix             MC all mc/sites ${nevery} ${ntrials} 2 ${seed} ${T} sites c_SITES mode gc mu ${mu}
+fix             MC all mc/sites ${nevery} ${ntrials} 2 ${seed} ${T} sites c_SITES mode gc mu ${mu} check ${check}
 thermo_style    custom step atoms temp pe press vol f_MC[4] f_MC[5] f_MC[6] f_MC[7]
 run             ${nmd}
 

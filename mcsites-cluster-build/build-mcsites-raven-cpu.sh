@@ -102,7 +102,8 @@ fi
 cd "$SRC"
 git fetch --all -q || true
 if git rev-parse -q --verify "$MCSITES_BRANCH" >/dev/null && \
-   git cat-file -e "$MCSITES_BRANCH:src/KOKKOS/fix_mc_sites_kokkos.cpp" 2>/dev/null; then
+   git cat-file -e "$MCSITES_BRANCH:src/KOKKOS/fix_mc_sites_kokkos.cpp" 2>/dev/null && \
+   git cat-file -p "$MCSITES_BRANCH:src/MC/fix_mc_sites.cpp" 2>/dev/null | grep -q run_consistency_checks; then
     echo ">> reusing branch $MCSITES_BRANCH: $(git log -1 --format='%h %s' "$MCSITES_BRANCH")"
 else
     echo ">> (re)creating $MCSITES_BRANCH from $FORK_COMMIT and applying mc-sites patches"

@@ -30,10 +30,13 @@ export OMP_NUM_THREADS=1
 # ================= USER CONFIG — baked-in defaults, EDIT IF PATHS MOVE =========
 # Bare `sbatch submit-mcmd-bench-viper-cpu.slurm` works with NO env vars.
 # Override for one run with --export, e.g. sbatch --export=ALL,NCELL=24 <script>.
-POTDIR="${POTDIR:-/viper/ptmp/biterik/POTENTIALS}"
+# SIDE-LOCAL RULE (MPCDF docs: Viper-CPU and Viper-GPU are separate clusters;
+# compute nodes cannot access the other system's filesystems): CPU jobs use
+# ptmp1 paths ONLY. Viper-CPU: /ptmp -> /viper/ptmp1.
+POTDIR="${POTDIR:-/viper/ptmp1/biterik/POTENTIALS}"
 POT="${POT:-ni_h_rcut4.90_rcut2.eam.alloy}"
-LMP="${LMP:-/viper/ptmp2/biterik/LAMMPS-compile-n-bench/lammps-mcsites/build-mcsites-viper-cpu/lmp_mcsites_fork24da74_viper_cpu}"
-IN="${IN:-/viper/ptmp2/biterik/LAMMPS-compile-n-bench/mcsites-cluster-build/bench/in.mcmd_bench_nih}"
+LMP="${LMP:-/viper/ptmp1/biterik/LAMMPS-compile-n-bench/lammps-mcsites/build-mcsites-viper-cpu/lmp_mcsites_fork24da74_viper_cpu}"
+IN="${IN:-/viper/ptmp1/biterik/LAMMPS-compile-n-bench/mcsites-cluster-build/bench/in.mcmd_bench_nih}"
 # ==============================================================================
 HERE="${SLURM_SUBMIT_DIR:-$PWD}"
 LOG="${LOG:-$HERE/log.${SLURM_JOB_ID:-out}.mcmd_bench_viper_cpu}"
