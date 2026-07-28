@@ -1,5 +1,11 @@
 # LAMMPS + MC-SITES — cluster build & run kit
 
+**Patch-series version: v1.1** — patches 0001-0010 (2026-07-28; adds the
+`fix mc/sites` `check` consistency-verification keyword + reset_timestep
+hardening). v1.0 = patches 0001-0009 (2026-07-21, Kokkos port) — the series
+the 2026-07-27 viper binaries were built from. Git tags `mc-sites-v1.0` /
+`mc-sites-v1.1` on the lammps branch mark the exact states.
+
 Build LAMMPS with the **full compile-n-bench package set** *plus* the **MC-SITES**
 contribution (`compute sites/voronoi` + `fix mc/sites`), on the five MPCDF targets:
 **cmmg, raven-gpu, raven-cpu, viper-cpu, viper-gpu**. Produces one uniquely-named

@@ -1,0 +1,222 @@
+From 29598b43d50aed8a75009093c3ac1e420adbf914 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <erik.bitzek@googlemail.com>
+Date: Tue, 28 Jul 2026 10:55:06 +0000
+Subject: [PATCH 10/10] fix mc/sites: check keyword (per-block consistency
+ verification) + reset_timestep-safe block schedule
+
+Two follow-ups from the 8B viper session (2026-07-27):
+
+- New optional keyword 'check yes': after every MC block verify (1) global
+  atom count == sum of per-rank nlocal, (2) species-atom count == catalogue
+  occupancy, (3) in gc mode, the stored Metropolis reference energy against
+  a fresh full-energy evaluation.  Errors out at the first inconsistent
+  block; costs one extra full-energy evaluation per block.  Debug aid for
+  qualifying large rank counts, new potentials, or modified builds.
+
+- init() re-arms next_reneighbor when the scheduled first block is in the
+  past or beyond the next Nevery window: a reset_timestep issued after the
+  fix definition could previously disarm the fix for an entire run
+  (observed as Msites=0/natt=0 in the original 8B bench input).
+
+Docs updated (keyword, defaults, prose paragraph).
+---
+ doc/src/fix_mc_sites.rst | 16 +++++++-
+ src/MC/fix_mc_sites.cpp  | 81 ++++++++++++++++++++++++++++++++++++++++
+ src/MC/fix_mc_sites.h    |  2 +
+ 3 files changed, 97 insertions(+), 2 deletions(-)
+
+diff --git a/doc/src/fix_mc_sites.rst b/doc/src/fix_mc_sites.rst
+index e6be41b..611407a 100644
+--- a/doc/src/fix_mc_sites.rst
++++ b/doc/src/fix_mc_sites.rst
+@@ -39,7 +39,7 @@ Syntax
+          value = number of unconditional insertions per invocation
+ 
+ * zero or more keyword/value pairs may be appended
+-* keyword = *region* or *tfac_insert* or *charge* or *maxspecies* or *overlap_cutoff*
++* keyword = *region* or *tfac_insert* or *charge* or *maxspecies* or *overlap_cutoff* or *check*
+ 
+   .. parsed-literal::
+ 
+@@ -49,6 +49,8 @@ Syntax
+        *maxspecies* value = skip insertions above this many species atoms
+        *overlap_cutoff* value = reject insertions at sites with clearance below this
+                                 without an energy evaluation (default 0.0 = off)
++       *check* value = *yes* or *no* = verify internal state consistency after
++                       every MC block (default *no*)
+ 
+ Examples
+ """"""""
+@@ -127,6 +129,16 @@ Multiple mc/sites fixes may be stacked, one per species (each with its
+ own type, mu, and site compute); two instances driving the same atom
+ type are rejected.
+ 
++The *check* keyword enables a state-consistency verification after
++every MC block: the global atom count is compared against the sum of
++per-processor counts, the number of species atoms is compared against
++the catalogue occupancy, and (in *gc* mode) the stored Metropolis
++reference energy is compared against a fresh full-energy evaluation.
++Any mismatch stops the run with an error identifying the first
++inconsistent block.  This costs one extra full-energy evaluation per
++block and is intended for validating new potentials, large processor
++counts, or modified builds before production use.
++
+ .. note::
+ 
+    The MC species atoms must not be time-integrated during the MC
+@@ -208,4 +220,4 @@ Default
+ """""""
+ 
+ tfac_insert = 1.0; no charge assignment; no region; no maxspecies cap;
+-overlap_cutoff = 0.0 (off).
++overlap_cutoff = 0.0 (off); check = no.
+diff --git a/src/MC/fix_mc_sites.cpp b/src/MC/fix_mc_sites.cpp
+index 56f32d1..bf3a84f 100644
+--- a/src/MC/fix_mc_sites.cpp
++++ b/src/MC/fix_mc_sites.cpp
+@@ -64,6 +64,10 @@ static constexpr int CATDELTA = 4096;              // catalogue grow chunk
+ // enum); harmless extra eflag bit where unknown, energy-only hint upstream
+ static constexpr int ENERGY_ONLY_HINT = 0x04;
+ static constexpr int OFFBAND_WARN_BLOCKS = 10;    // acceptance-ratio warning patience
++// check keyword: energy bookkeeping tolerance -- fp summation-order noise of a
++// full-energy evaluation, far below any physically meaningful energy error
++static constexpr double CHECK_ETOL_ABS = 1.0e-6;
++static constexpr double CHECK_ETOL_REL = 1.0e-9;
+ 
+ /* ---------------------------------------------------------------------- */
+ 
+@@ -104,6 +108,7 @@ FixMCSites::FixMCSites(LAMMPS *lmp, int narg, char **arg) :
+   charge_flag = 0;
+   maxspecies = -1;
+   overlap_cutoff = 0.0;
++  check_flag = 0;
+   nfile_sites = 0;
+ 
+   int mode_set = 0, sites_set = 0;
+@@ -174,6 +179,10 @@ FixMCSites::FixMCSites(LAMMPS *lmp, int narg, char **arg) :
+       if (overlap_cutoff < 0.0)
+         error->all(FLERR, "Fix mc/sites overlap_cutoff must be >= 0.0, got {}", overlap_cutoff);
+       iarg += 2;
++    } else if (strcmp(arg[iarg], "check") == 0) {
++      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix mc/sites check", error);
++      check_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
++      iarg += 2;
+     } else
+       error->all(FLERR, "Unknown fix mc/sites keyword: {}", arg[iarg]);
+   }
+@@ -324,6 +333,15 @@ void FixMCSites::init()
+   }
+ 
+   if (sites_file && !file_xyz) read_sites_file();
++
++  // re-arm a schedule made stale or unreachable by reset_timestep: the first
++  // block is armed at fix creation (current step + 1), and reset_timestep does
++  // not remap fix reneighbor schedules -- without this, a reset_timestep
++  // issued after the fix definition can silently disarm the fix for a whole
++  // run (scheduled step in the past, or beyond the steps the run executes)
++
++  if (next_reneighbor <= update->ntimestep || next_reneighbor > update->ntimestep + mcs_nevery)
++    next_reneighbor = update->ntimestep + 1;
+ }
+ 
+ /* ----------------------------------------------------------------------
+@@ -615,6 +633,8 @@ void FixMCSites::pre_exchange()
+   nspecies_out = (double) nocc;
+   ncatalog_out = (double) ncatalog;
+ 
++  if (check_flag) run_consistency_checks(nocc);
++
+   double block_attempts = nattempts - attempts_before;
+   if (mode == MODE_GC && block_attempts > 0.0) {
+     double ratio = (ninsert_acc + ndelete_acc - accepted_before) / block_attempts;
+@@ -632,6 +652,67 @@ void FixMCSites::pre_exchange()
+   next_reneighbor = update->ntimestep + mcs_nevery;
+ }
+ 
++/* ----------------------------------------------------------------------
++   check keyword: per-block state-consistency verification (debug aid for
++   parallel investigations; one extra full-energy evaluation per block).
++   errors out at the FIRST inconsistent block, so a parallel bookkeeping
++   bug is pinpointed to the block where it happens instead of surfacing
++   later as silently wrong statistics
++------------------------------------------------------------------------- */
++
++void FixMCSites::run_consistency_checks(bigint nocc)
++{
++  sync_atoms_host();    // checks read x/mask/type on the host (kk subclass)
++
++  // 1. global atom count: natoms must equal the sum of nlocal over ranks
++  //    (catches trial-atom cleanup removing the wrong number of atoms)
++
++  bigint nlocal_bigint = atom->nlocal;
++  bigint natoms_actual;
++  MPI_Allreduce(&nlocal_bigint, &natoms_actual, 1, MPI_LMP_BIGINT, MPI_SUM, world);
++  if (natoms_actual != atom->natoms)
++    error->all(FLERR,
++               "Fix mc/sites {} consistency check failed on step {}: sum of nlocal {} "
++               "!= natoms {}",
++               id, update->ntimestep, natoms_actual, atom->natoms);
++
++  // 2. species accounting: atoms of the species type (in group/region) must
++  //    match the catalogue occupancy (catches a rejected trial atom leaking
++  //    into the system or a host atom deleted in its place)
++
++  double **x = atom->x;
++  int *mask = atom->mask;
++  int *type = atom->type;
++  bigint nsp_local = 0;
++  for (int i = 0; i < atom->nlocal; i++) {
++    if (!(mask[i] & groupbit)) continue;
++    if (type[i] != mcs_type) continue;
++    if (region && !region->match(x[i][0], x[i][1], x[i][2])) continue;
++    nsp_local++;
++  }
++  bigint nsp;
++  MPI_Allreduce(&nsp_local, &nsp, 1, MPI_LMP_BIGINT, MPI_SUM, world);
++  if (nsp != nocc)
++    error->all(FLERR,
++               "Fix mc/sites {} consistency check failed on step {}: {} species atoms "
++               "vs {} occupied catalogue entries",
++               id, update->ntimestep, nsp, nocc);
++
++  // 3. energy bookkeeping (gc mode): energy_stored must equal a fresh full
++  //    evaluation (catches an imperfect reject-restore desynchronizing the
++  //    Metropolis reference energy)
++
++  if (mode == MODE_GC) {
++    double e_verify = energy_full();
++    double etol = MAX(CHECK_ETOL_ABS, CHECK_ETOL_REL * fabs(e_verify));
++    if (fabs(e_verify - energy_stored) > etol)
++      error->all(FLERR,
++                 "Fix mc/sites {} consistency check failed on step {}: stored energy "
++                 "{:.10} vs recomputed {:.10} (tol {:.3})",
++                 id, update->ntimestep, energy_stored, e_verify, etol);
++  }
++}
++
+ /* ----------------------------------------------------------------------
+    which rank owns a position: remap into the box, test the subdomain
+    (fix gcmc pattern); returns 1 on exactly one rank
+diff --git a/src/MC/fix_mc_sites.h b/src/MC/fix_mc_sites.h
+index 94eb9b6..edc6fdc 100644
+--- a/src/MC/fix_mc_sites.h
++++ b/src/MC/fix_mc_sites.h
+@@ -63,6 +63,7 @@ class FixMCSites : public Fix {
+   int charge_flag;
+   bigint maxspecies;        // cap on N_species (insertions skipped above)
+   double overlap_cutoff;    // pre-reject insertions at clearance below this
++  int check_flag;           // per-block state-consistency verification
+ 
+   char *idsites_compute;    // sites compute ID (dynamic catalogue) or null
+   class Compute *sites_compute;
+@@ -102,6 +103,7 @@ class FixMCSites : public Fix {
+   virtual void attempt_deletion(int);
+   virtual void run_source_mode();
+   virtual double energy_full();
++  void run_consistency_checks(bigint);
+   int site_owner_flag(double *);
+   tagint global_new_tag(int);
+ 
+-- 
+2.43.0
+
