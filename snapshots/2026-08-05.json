@@ -1,0 +1,151 @@
+{
+  "activity": {
+    "commits_30d": 21,
+    "contributors_total": 2,
+    "issues_closed_30d": 0,
+    "issues_opened_30d": 0,
+    "prs_merged_30d": 1,
+    "prs_opened_30d": 1
+  },
+  "collected_at": "2026-08-05T06:01:45Z",
+  "date": "2026-08-05",
+  "errors": [],
+  "meta": {
+    "archived": false,
+    "created_at": "2026-06-10T09:56:40Z",
+    "default_branch": "main",
+    "fork": false,
+    "open_issues": 0,
+    "pushed_at": "2026-08-04T20:45:37Z",
+    "size_kb": 427
+  },
+  "popularity": {
+    "forks": 0,
+    "stars": 1,
+    "subscribers": 0,
+    "watchers": 1
+  },
+  "releases": [],
+  "repo": "biterik/LAMMPS-compile-n-bench",
+  "schema_version": 1,
+  "traffic": {
+    "clones": {
+      "2026-07-21": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-22": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-23": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-24": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-25": {
+        "count": 1,
+        "uniques": 1
+      },
+      "2026-07-26": {
+        "count": 1,
+        "uniques": 1
+      },
+      "2026-07-27": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-28": {
+        "count": 15,
+        "uniques": 7
+      },
+      "2026-07-29": {
+        "count": 1,
+        "uniques": 1
+      },
+      "2026-07-30": {
+        "count": 2,
+        "uniques": 2
+      },
+      "2026-07-31": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-08-01": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-08-02": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-08-03": {
+        "count": 1,
+        "uniques": 1
+      }
+    },
+    "paths": [],
+    "referrers": [],
+    "views": {
+      "2026-07-21": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-22": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-23": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-24": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-25": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-26": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-27": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-28": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-29": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-30": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-07-31": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-08-01": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-08-02": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-08-03": {
+        "count": 0,
+        "uniques": 0
+      }
+    }
+  }
+}
