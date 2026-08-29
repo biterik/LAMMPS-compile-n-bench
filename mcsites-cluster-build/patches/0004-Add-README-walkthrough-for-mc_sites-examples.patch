@@ -1,7 +1,7 @@
 From 8a28f8594391a11c4429020d680857574e8401ea Mon Sep 17 00:00:00 2001
 From: Erik Bitzek <e.bitzek@mpie.de>
 Date: Wed, 8 Jul 2026 14:23:57 +0200
-Subject: [PATCH 4/5] Add README walkthrough for mc_sites examples
+Subject: [PATCH] Add README walkthrough for mc_sites examples
 
 ---
  examples/PACKAGES/mc_sites/README.md | 120 +++++++++++++++++++++++++++
@@ -135,5 +135,5 @@ index 0000000..d4e7b2d
 +  streams per rank); the isotherm mean must still match. Determinism is checked in
 +  `tests/test_8_9_parallel.py`.
 -- 
-2.54.0
+2.34.1
 

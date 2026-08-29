@@ -1,7 +1,7 @@
 From a72336d3fa9e1f2b4bf9306de0d6d8c9db49e296 Mon Sep 17 00:00:00 2001
 From: Erik Bitzek <e.bitzek@mpie.de>
 Date: Tue, 7 Jul 2026 22:11:51 +0200
-Subject: [PATCH 3/5] Docs, examples, formatting for compute sites/voronoi +
+Subject: [PATCH 3/4] Docs, examples, formatting for compute sites/voronoi +
  fix mc/sites
 
 - doc/src pages for both styles + command-table/list registration
