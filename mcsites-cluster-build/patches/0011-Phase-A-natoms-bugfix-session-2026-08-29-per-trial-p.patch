@@ -1,0 +1,375 @@
+From dafdd6f96e984e3da131bd908462c956ce0806f7 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Sat, 29 Aug 2026 18:36:01 +0200
+Subject: [PATCH 11/12] Phase A (natoms bugfix session 2026-08-29): per-trial
+ parallel-invariant diagnostics
+
+Instrument fix mc/sites so a parallel count corruption is caught at the
+trial where it happens, with the identity of the site/tag, instead of
+surfacing as the vague block-end 'sum of nlocal != natoms' abort:
+
+- unconditional owner-count assertion on every insertion/deletion/source
+  trial (one int allreduce; a trial already pays a full energy
+  evaluation): exactly one rank must execute the trial. Catches
+  no-owner insertions (H1), double-owner deletions (H2), no-owner
+  deletions (H4) with site coords, catalogue index, tag, box bounds and
+  periodicity in the message.
+- check yes: per-trial rank-uniformity assertion over {accept decision,
+  natoms, mu, beta, energy_after, energy_before} (MIN/MAX allreduce);
+  any cross-rank divergence of the Metropolis inputs (H3 family) is
+  named at its birth, before the accept/reject branches can cascade.
+- check yes: MC-block-start checks: natoms vs sum(nlocal) BEFORE the
+  block (attributes corruption to the MD segment / other fixes, not the
+  MC), and sum(nlocal) across the block-start exchange (attributes
+  genuine atom loss through a non-periodic boundary, H5).
+- check #1 failure forensics: occupied catalogue entries whose tag no
+  rank (or 2+ ranks) resolves, plus a cross-rank duplicate-tag census.
+- test-only hook MCS_DEBUG_PERTURB_ENERGY=<rank>: alternating-sign
+  energy_full() offset on one rank, to exercise the divergence
+  diagnostics deterministically (inert unless the env var is set).
+
+Gate A: 44/44 suite green on build/lmp; file-mode no-owner site and
+np=2 perturbed-energy injections both produce the new precise errors.
+Injection also reproduces the campaign signature: with checks off, a
+single divergent trial cascades to 'Lost atoms: original 12 current 11'
+(natoms high by 1, the observed sign) and, seed-dependent, to a
+2-ranks-own-the-trial deletion -- the 'deletion path' as a downstream
+symptom of a rank-divergent trial.
+---
+ src/MC/fix_mc_sites.cpp | 221 ++++++++++++++++++++++++++++++++++++++--
+ src/MC/fix_mc_sites.h   |   5 +
+ 2 files changed, 220 insertions(+), 6 deletions(-)
+
+diff --git a/src/MC/fix_mc_sites.cpp b/src/MC/fix_mc_sites.cpp
+index bf3a84f..bb95bed 100644
+--- a/src/MC/fix_mc_sites.cpp
++++ b/src/MC/fix_mc_sites.cpp
+@@ -50,8 +50,11 @@
+ #include "update.h"
+ #include "variable.h"
+ 
++#include <algorithm>
+ #include <cmath>
++#include <cstdlib>
+ #include <cstring>
++#include <string>
+ 
+ using namespace LAMMPS_NS;
+ using namespace FixConst;
+@@ -221,6 +224,24 @@ FixMCSites::FixMCSites(LAMMPS *lmp, int narg, char **arg) :
+   nblocks_offband = 0;
+   energy_stored = 0.0;
+   beta = sigma = gas_mass = 0.0;
++
++  // test-only fault injection (validation suite): if MCS_DEBUG_PERTURB_ENERGY
++  // names a rank, that rank's energy_full() result is offset by a fixed
++  // amount, emulating a cross-rank-divergent energy reduction so the
++  // divergence diagnostics and the uniformity hardening can be exercised
++  // deterministically.  inert unless the environment variable is set
++
++  debug_perturb_rank = -1;
++  debug_perturb_ncalls = 0;
++  const char *dbg = getenv("MCS_DEBUG_PERTURB_ENERGY");
++  if (dbg) {
++    debug_perturb_rank = utils::inumeric(FLERR, dbg, false, lmp);
++    if (comm->me == 0)
++      error->warning(FLERR,
++                     "Fix mc/sites {} TEST MODE: rank {} energy_full() perturbed via "
++                     "MCS_DEBUG_PERTURB_ENERGY",
++                     id, debug_perturb_rank);
++  }
+ }
+ 
+ /* ---------------------------------------------------------------------- */
+@@ -571,7 +592,26 @@ void FixMCSites::pre_exchange()
+     subhi = domain->subhi;
+   }
+ 
+-  // re-home atoms, rebuild ghosts and neighbor lists
++  // re-home atoms, rebuild ghosts and neighbor lists.
++  // under check: count atoms before and after the exchange, so genuine atom
++  // loss at a non-periodic boundary (an atom pushed out of the box by the MD
++  // segment; comm->exchange() silently drops it) is reported as such HERE,
++  // instead of surfacing later as an MC bookkeeping mismatch in check #1
++
++  bigint nlocal_pre_exchange = 0;
++  if (check_flag) {
++    bigint nlocal_bigint = atom->nlocal;
++    MPI_Allreduce(&nlocal_bigint, &nlocal_pre_exchange, 1, MPI_LMP_BIGINT, MPI_SUM, world);
++    if (nlocal_pre_exchange != atom->natoms) {
++      sync_atoms_host();
++      report_count_forensics(nlocal_pre_exchange);
++      error->all(FLERR,
++                 "Fix mc/sites {} check on step {}: sum of nlocal {} != natoms {} already at "
++                 "MC block start, before any trial: the count corruption happened OUTSIDE "
++                 "this fix (during the MD segment or in another fix)",
++                 id, update->ntimestep, nlocal_pre_exchange, atom->natoms);
++    }
++  }
+ 
+   if (triclinic) domain->x2lamda(atom->nlocal);
+   domain->pbc();
+@@ -584,6 +624,19 @@ void FixMCSites::pre_exchange()
+ 
+   sync_atoms_host();
+ 
++  if (check_flag) {
++    bigint nlocal_bigint = atom->nlocal;
++    bigint nlocal_post_exchange;
++    MPI_Allreduce(&nlocal_bigint, &nlocal_post_exchange, 1, MPI_LMP_BIGINT, MPI_SUM, world);
++    if (nlocal_post_exchange != nlocal_pre_exchange)
++      error->all(FLERR,
++                 "Fix mc/sites {} check on step {}: {} atom(s) were lost in the exchange at "
++                 "MC block start ({} before, {} after): genuine atom loss through a "
++                 "non-periodic boundary, not an MC bookkeeping error",
++                 id, update->ntimestep, nlocal_pre_exchange - nlocal_post_exchange,
++                 nlocal_pre_exchange, nlocal_post_exchange);
++  }
++
+   build_catalog();
+ 
+   if (ncatalog == 0) {
+@@ -670,11 +723,13 @@ void FixMCSites::run_consistency_checks(bigint nocc)
+   bigint nlocal_bigint = atom->nlocal;
+   bigint natoms_actual;
+   MPI_Allreduce(&nlocal_bigint, &natoms_actual, 1, MPI_LMP_BIGINT, MPI_SUM, world);
+-  if (natoms_actual != atom->natoms)
++  if (natoms_actual != atom->natoms) {
++    report_count_forensics(natoms_actual);
+     error->all(FLERR,
+                "Fix mc/sites {} consistency check failed on step {}: sum of nlocal {} "
+-               "!= natoms {}",
++               "!= natoms {} (forensics above)",
+                id, update->ntimestep, natoms_actual, atom->natoms);
++  }
+ 
+   // 2. species accounting: atoms of the species type (in group/region) must
+   //    match the catalogue occupancy (catches a rejected trial atom leaking
+@@ -713,6 +768,145 @@ void FixMCSites::run_consistency_checks(bigint nocc)
+   }
+ }
+ 
++/* ----------------------------------------------------------------------
++   invariant: every trial must have exactly one executing rank.  0 owners
++   on insertion means a catalogue site outside every subdomain (natoms
++   would be incremented with no atom created); 0 owners on deletion means
++   a tag no rank resolves (natoms decremented with no atom removed); 2+
++   owners double-execute the local mechanics.  each is silent count
++   corruption that check #1 would only catch at block end, without the
++   site identity -- so this is asserted unconditionally per trial (one int
++   allreduce; the trial already pays a full energy evaluation)
++------------------------------------------------------------------------- */
++
++void FixMCSites::assert_site_owner_count(int proc_flag, int idx, const char *action)
++{
++  int nowner;
++  MPI_Allreduce(&proc_flag, &nowner, 1, MPI_INT, MPI_SUM, world);
++  if (nowner == 1) return;
++  error->all(FLERR,
++             "Fix mc/sites {} {} on step {}: {} ranks own the trial (must be exactly 1). "
++             "Catalogue entry {} of {}: site ({:.17e} {:.17e} {:.17e}), tag {}, box "
++             "({:.17e} {:.17e} {:.17e}) to ({:.17e} {:.17e} {:.17e}), periodicity ({} {} {})",
++             id, action, update->ntimestep, nowner, idx, ncatalog, catalog[idx].x[0],
++             catalog[idx].x[1], catalog[idx].x[2], catalog[idx].tag, domain->boxlo[0],
++             domain->boxlo[1], domain->boxlo[2], domain->boxhi[0], domain->boxhi[1],
++             domain->boxhi[2], domain->periodicity[0], domain->periodicity[1],
++             domain->periodicity[2]);
++}
++
++/* ----------------------------------------------------------------------
++   check keyword: the accept/reject decision and the state it derives from
++   must be bit-identical on all ranks; a divergence (e.g. an equal-style
++   mu/temp variable evaluating differently across ranks) makes ranks take
++   different branches and desynchronizes natoms itself
++------------------------------------------------------------------------- */
++
++void FixMCSites::assert_rank_uniform_decision(int accept, double energy_after, double energy_before,
++                                              const char *action)
++{
++  double state[6], smin[6], smax[6];
++  state[0] = (double) accept;
++  state[1] = (double) atom->natoms;
++  state[2] = mu;
++  state[3] = beta;
++  state[4] = energy_after;
++  state[5] = energy_before;
++  MPI_Allreduce(state, smin, 6, MPI_DOUBLE, MPI_MIN, world);
++  MPI_Allreduce(state, smax, 6, MPI_DOUBLE, MPI_MAX, world);
++  int uniform = 1;
++  for (int k = 0; k < 6; k++)
++    if (smin[k] != smax[k]) uniform = 0;
++  if (uniform) return;
++  error->all(FLERR,
++             "Fix mc/sites {} check on step {}: rank-divergent {} trial: accept {}..{}, "
++             "natoms {:.17e}..{:.17e}, mu {:.17e}..{:.17e}, beta {:.17e}..{:.17e}, "
++             "energy_after {:.17e}..{:.17e}, energy_before {:.17e}..{:.17e}",
++             id, update->ntimestep, action, (int) smin[0], (int) smax[0], smin[1], smax[1], smin[2],
++             smax[2], smin[3], smax[3], smin[4], smax[4], smin[5], smax[5]);
++}
++
++/* ----------------------------------------------------------------------
++   abort-path forensics for a count mismatch: name what is identifiable --
++   occupied catalogue entries whose tag no rank (or 2+ ranks) resolves to
++   an owned atom, and duplicated tags across ranks.  cost is irrelevant
++   (the run is about to error out)
++------------------------------------------------------------------------- */
++
++void FixMCSites::report_count_forensics(bigint natoms_actual)
++{
++  // occupied catalogue entries vs the atom map
++
++  int nmissing = 0, nmulti = 0;
++  std::string detail;
++  if (ncatalog > 0) {
++    int *own = new int[ncatalog];
++    int *ownall = new int[ncatalog];
++    for (int i = 0; i < ncatalog; i++) {
++      own[i] = 0;
++      if (catalog[i].tag > 0) {
++        int m = atom->map(catalog[i].tag);
++        if (m >= 0 && m < atom->nlocal) own[i] = 1;
++      }
++    }
++    MPI_Allreduce(own, ownall, ncatalog, MPI_INT, MPI_SUM, world);
++    for (int i = 0; i < ncatalog; i++) {
++      if (catalog[i].tag <= 0) continue;
++      if (ownall[i] == 1) continue;
++      if (ownall[i] == 0)
++        nmissing++;
++      else
++        nmulti++;
++      if (nmissing + nmulti <= 8)
++        detail += fmt::format("  catalogue entry {}: tag {} at ({:.6} {:.6} {:.6}) owned by "
++                              "{} ranks\n",
++                              i, catalog[i].tag, catalog[i].x[0], catalog[i].x[1], catalog[i].x[2],
++                              ownall[i]);
++    }
++    delete[] own;
++    delete[] ownall;
++  }
++
++  // duplicate tags across all ranks (gather to rank 0)
++
++  int nprocs = comm->nprocs;
++  int nlocal = atom->nlocal;
++  int *counts = nullptr, *displs = nullptr;
++  tagint *alltags = nullptr;
++  if (comm->me == 0) {
++    counts = new int[nprocs];
++    displs = new int[nprocs];
++  }
++  MPI_Gather(&nlocal, 1, MPI_INT, counts, 1, MPI_INT, 0, world);
++  bigint ntotal = 0;
++  if (comm->me == 0) {
++    for (int p = 0; p < nprocs; p++) {
++      displs[p] = (int) ntotal;
++      ntotal += counts[p];
++    }
++    alltags = new tagint[MAX(ntotal, (bigint) 1)];
++  }
++  MPI_Gatherv(atom->tag, nlocal, MPI_LMP_TAGINT, alltags, counts, displs, MPI_LMP_TAGINT, 0, world);
++  bigint ndup = 0;
++  if (comm->me == 0) {
++    std::sort(alltags, alltags + ntotal);
++    for (bigint i = 1; i < ntotal; i++)
++      if (alltags[i] == alltags[i - 1]) ndup++;
++    delete[] alltags;
++    delete[] counts;
++    delete[] displs;
++  }
++  MPI_Bcast(&ndup, 1, MPI_LMP_BIGINT, 0, world);
++
++  if (comm->me == 0)
++    utils::logmesg(lmp,
++                   "Fix mc/sites {} count-mismatch forensics on step {}: sum of nlocal {}, "
++                   "natoms {}, deficit {}; {} occupied catalogue entries with no owning rank, "
++                   "{} with multiple owners; {} duplicated atom tags across ranks\n{}",
++                   id, update->ntimestep, natoms_actual, atom->natoms, atom->natoms - natoms_actual,
++                   nmissing, nmulti, ndup, detail);
++}
++
+ /* ----------------------------------------------------------------------
+    which rank owns a position: remap into the box, test the subdomain
+    (fix gcmc pattern); returns 1 on exactly one rank
+@@ -767,6 +961,7 @@ void FixMCSites::attempt_insertion(int idx)
+   double energy_before = energy_stored;
+   double coord[3] = {catalog[idx].x[0], catalog[idx].x[1], catalog[idx].x[2]};
+   int proc_flag = site_owner_flag(coord);
++  assert_site_owner_count(proc_flag, idx, "insertion");
+ 
+   sync_atoms_host();
+   if (proc_flag) {
+@@ -795,8 +990,11 @@ void FixMCSites::attempt_insertion(int idx)
+ 
+   double energy_after = energy_full();
+ 
+-  if (energy_after < MAXENERGYTEST &&
+-      random_equal->uniform() < exp(-beta * (energy_after - energy_before - mu))) {
++  int accept = (energy_after < MAXENERGYTEST &&
++                random_equal->uniform() < exp(-beta * (energy_after - energy_before - mu)));
++  if (check_flag) assert_rank_uniform_decision(accept, energy_after, energy_before, "insertion");
++
++  if (accept) {
+     ninsert_acc += 1.0;
+     energy_stored = energy_after;
+     catalog[idx].tag = newtag;
+@@ -828,6 +1026,7 @@ void FixMCSites::attempt_deletion(int idx)
+   tagint dtag = catalog[idx].tag;
+   int m = atom->map(dtag);
+   int proc_flag = (m >= 0 && m < atom->nlocal);
++  assert_site_owner_count(proc_flag, idx, "deletion");
+ 
+   sync_atoms_host();
+   if (proc_flag) {
+@@ -856,7 +1055,10 @@ void FixMCSites::attempt_deletion(int idx)
+ 
+   double energy_after = energy_full();
+ 
+-  if (random_equal->uniform() < exp(-beta * (energy_after - energy_before + mu))) {
++  int accept = (random_equal->uniform() < exp(-beta * (energy_after - energy_before + mu)));
++  if (check_flag) assert_rank_uniform_decision(accept, energy_after, energy_before, "deletion");
++
++  if (accept) {
+     ndelete_acc += 1.0;
+     energy_stored = energy_after;
+     // entry stays in the catalogue as empty at the deleted atom's position:
+@@ -927,6 +1129,7 @@ void FixMCSites::run_source_mode()
+ 
+     double coord[3] = {catalog[idx].x[0], catalog[idx].x[1], catalog[idx].x[2]};
+     int proc_flag = site_owner_flag(coord);
++    assert_site_owner_count(proc_flag, idx, "source insertion");
+ 
+     sync_atoms_host();
+     if (proc_flag) {
+@@ -1003,6 +1206,12 @@ double FixMCSites::energy_full()
+   update->eflag_global = update->ntimestep;
+   double energy = c_pe->compute_scalar();
+ 
++  // alternating sign so the offset does NOT cancel in dU = E_after - E_before:
++  // emulates a per-call-varying cross-rank reduction discrepancy
++
++  if (debug_perturb_rank >= 0 && comm->me == debug_perturb_rank)
++    energy += 0.05 * ((++debug_perturb_ncalls) & 1);
++
+   // leave the host copy of the atom data current for the caller's next
+   // host-side trial mechanics
+ 
+diff --git a/src/MC/fix_mc_sites.h b/src/MC/fix_mc_sites.h
+index edc6fdc..9157e5a 100644
+--- a/src/MC/fix_mc_sites.h
++++ b/src/MC/fix_mc_sites.h
+@@ -104,6 +104,11 @@ class FixMCSites : public Fix {
+   virtual void run_source_mode();
+   virtual double energy_full();
+   void run_consistency_checks(bigint);
++  void assert_site_owner_count(int, int, const char *);
++  void assert_rank_uniform_decision(int, double, double, const char *);
++  int debug_perturb_rank;         // test hook: rank whose energy_full is offset (-1 = off)
++  bigint debug_perturb_ncalls;    // test hook: energy_full call counter
++  void report_count_forensics(bigint);
+   int site_owner_flag(double *);
+   tagint global_new_tag(int);
+ 
+-- 
+2.55.0
+
