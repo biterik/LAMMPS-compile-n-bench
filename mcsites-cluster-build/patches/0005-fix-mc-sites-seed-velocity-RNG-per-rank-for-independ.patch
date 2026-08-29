@@ -1,7 +1,7 @@
 From f530d7cc6b921ef2e73a6dc05fadfa25856b5822 Mon Sep 17 00:00:00 2001
 From: Erik Bitzek <e.bitzek@mpie.de>
 Date: Mon, 13 Jul 2026 12:30:05 +0200
-Subject: [PATCH 5/5] fix mc/sites: seed velocity RNG per rank for independent
+Subject: [PATCH] fix mc/sites: seed velocity RNG per rank for independent
  inserted-atom velocities
 
 ---
@@ -28,5 +28,5 @@ index eb0bc8c..150d0cd 100644
    force_reneighbor = 1;
    next_reneighbor = update->ntimestep + 1;
 -- 
-2.54.0
+2.55.0
 

@@ -1,7 +1,7 @@
 From 886415d20bba1042142873d2b3214af994b6de7b Mon Sep 17 00:00:00 2001
 From: Erik Bitzek <e.bitzek@mpie.de>
 Date: Tue, 7 Jul 2026 21:45:13 +0200
-Subject: [PATCH 2/5] Add fix mc/sites: lattice-gas GCMC on a frozen site
+Subject: [PATCH 2/4] Add fix mc/sites: lattice-gas GCMC on a frozen site
  catalogue
 
 gc + source modes; catalogue = empty sites (compute or static file) +
