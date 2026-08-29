@@ -1,7 +1,7 @@
 From a613785afebf8082853e41cb12f636f664c62b06 Mon Sep 17 00:00:00 2001
 From: Erik Bitzek <e.bitzek@mpie.de>
 Date: Tue, 7 Jul 2026 20:58:12 +0200
-Subject: [PATCH 1/5] Add compute sites/voronoi: Voronoi-vertex site catalogue
+Subject: [PATCH 1/4] Add compute sites/voronoi: Voronoi-vertex site catalogue
 
 Vertices of the voro++ tessellation of all group atoms = centers of
 largest empty spheres. Per-rank extraction with ghost halo, rmerge
