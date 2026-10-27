@@ -1,0 +1,7 @@
+built: 2026-10-19T20:53:54+02:00 on a cmmg login node
+source: stable_22Jul2025_update3  #define LAMMPS_VERSION "22 Jul 2025" #define LAMMPS_UPDATE "Update 3" 
+patches: 0001-fix-atom-swap-per-rank-random_unequal.patch 0002-fix-gcmc-per-rank-random_unequal.patch 
+modules: gcc/13 impi/2021.16 cmake/3.30 mkl/2025.2 gsl/2.7
+93f14f46ad0d6049be02727bc0bdd02e  /cmmc/ptmp/$USER/LAMMPS-ATOMSWAP-PATCH/bin/lmp_cmmg_22Jul2025u3_stock
+beaed34ea4b61562a577c2f978bff1ab  /cmmc/ptmp/$USER/LAMMPS-ATOMSWAP-PATCH/bin/lmp_cmmg_22Jul2025u3_atomswap-rankseed
+diff: /cmmc/ptmp/$USER/LAMMPS-ATOMSWAP-PATCH/bin/applied-patches.diff (159 lines)

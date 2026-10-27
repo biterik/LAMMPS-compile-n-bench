@@ -1,5 +1,13 @@
 # LAMMPS + MC-SITES — cluster build & run kit
 
+**Patch-series version: v1.3** — patches 0001-0013 (2026-10-19; adds 0013: `fix atom/swap`
+and `fix gcmc` seed their per-rank RNG per MPI rank and store its state per rank — the
+fork, like upstream, seeded every rank identically, so semi-grand acceptances came in
+bursts of ~nprocs; diagnosis and upstream patch in `../atomswap-rankseed-build/`).
+Binary name on cmmg: `lmp_mcsites_v13_cmmg`. The build scripts now re-create the
+`feature/mc-sites` branch automatically when 0013 is missing from it. v1.2 = 0001-0012
+(2026-08-29, uniformity-by-construction + natoms bugfix).
+
 **Patch-series version: v1.1** — patches 0001-0010 (2026-07-28; adds the
 `fix mc/sites` `check` consistency-verification keyword + reset_timestep
 hardening). v1.0 = patches 0001-0009 (2026-07-21, Kokkos port) — the series

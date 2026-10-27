@@ -1,0 +1,188 @@
+From 52ba194211361d59aee12d48f2fa5de2d3412068 Mon Sep 17 00:00:00 2001
+From: Erik Bitzek <e.bitzek@mpie.de>
+Date: Mon, 19 Oct 2026 20:34:37 +0200
+Subject: [PATCH] fix atom/swap + fix gcmc: seed random_unequal per MPI rank,
+ store its state per rank
+
+Both fixes created random_unequal with the same seed on every rank although the
+owning rank alone draws the trial type / displacement and the Metropolis number
+from it. All ranks therefore walk the same sequence of acceptance numbers and
+accept in bursts of ~nprocs (observed as +250..+500 Cu jumps on 256 ranks in a
+semi-grand Ni-Cu run, Cu-AT-DISLOCS thread 08, 2026-10-19). The restart path had
+the same defect (rank-0 state handed to every rank).
+
+fix atom/swap: derive a distinct per-rank state with RanPark::reset(seed, {rank,0,0})
+(a plain seed+rank keeps Park-Miller ranks in step); write_restart gathers one
+state per rank after the 8 global values (incl. the fork's adaptive-mu fields);
+restart() restores per rank when nprocs is unchanged, else re-hashes the stored
+rank-0 state per rank.
+fix gcmc: same constructor fix; restart re-hashes the stored rank-0 state per rank.
+
+Same change as atomswap-rankseed-build/patches/0001+0002 for upstream
+stable_22Jul2025, ported to the fork's fix_atom_swap.cpp (MCnoforce-localE).
+---
+ src/MC/fix_atom_swap.cpp | 54 ++++++++++++++++++++++++++++++++++------
+ src/MC/fix_gcmc.cpp      | 25 ++++++++++++++++---
+ 2 files changed, 69 insertions(+), 10 deletions(-)
+
+diff --git a/src/MC/fix_atom_swap.cpp b/src/MC/fix_atom_swap.cpp
+index d6c2e20bc..f6718272c 100644
+--- a/src/MC/fix_atom_swap.cpp
++++ b/src/MC/fix_atom_swap.cpp
+@@ -55,6 +55,21 @@
+ using namespace LAMMPS_NS;
+ using namespace FixConst;
+ 
++/* ----------------------------------------------------------------------
++   give the "unequal" RNG a distinct, well-mixed state on every MPI rank.
++   A plain seed+rank offset is not enough for the Park-Miller generator:
++   consecutive seeds s and s+1 produce first draws that differ by only
++   16807/2^31 ~ 8e-6, so the ranks would still start (nearly) in step.
++   Hash (seed, rank) with the Jenkins hash that RanPark::reset(int,double*)
++   already provides for per-atom seeding.
++------------------------------------------------------------------------- */
++
++static void reset_rng_per_rank(RanPark *rng, int seed, int rank)
++{
++  double rank_coord[3] = {static_cast<double>(rank), 0.0, 0.0};
++  rng->reset(seed, rank_coord);
++}
++
+ /* ---------------------------------------------------------------------- */
+ 
+ FixAtomSwap::FixAtomSwap(LAMMPS *lmp, int narg, char **arg) :
+@@ -153,9 +168,14 @@ FixAtomSwap::FixAtomSwap(LAMMPS *lmp, int narg, char **arg) :
+ 
+   random_equal = new RanPark(lmp, seed);
+ 
+-  // random number generator, not the same for all procs
++  // random number generator, not the same for all procs:
++  // the new type and the Metropolis number of a semi-grand attempt are drawn
++  // from it on the rank that owns the picked atom only, so every rank must
++  // hold its own stream. Seeding all ranks identically makes them walk the
++  // same sequence of acceptance numbers and accept in bursts of ~nprocs.
+ 
+   random_unequal = new RanPark(lmp, seed);
++  reset_rng_per_rank(random_unequal, seed, comm->me);
+ 
+   // set up reneighboring
+ 
+@@ -1453,21 +1473,30 @@ double FixAtomSwap::memory_usage()
+ 
+ void FixAtomSwap::write_restart(FILE *fp)
+ {
++  // global values, then the per-rank state of random_unequal (one per rank)
++
++  int nglobalvals = 9;
++  int nlocalvals = comm->nprocs;
++  int ntotalvals = nglobalvals + nlocalvals;
++  std::vector<double> list(ntotalvals);
+   int n = 0;
+-  double list[8];
+   list[n++] = random_equal->state();
+-  list[n++] = random_unequal->state();
++  list[n++] = random_unequal->state();    // rank 0 state: fallback if nprocs changes
+   list[n++] = ubuf(next_reneighbor).d;
+   list[n++] = nswap_attempts;
+   list[n++] = nswap_successes;
+   list[n++] = ubuf(update->ntimestep).d;
+   list[n++] = adapt_mu_current;   // adaptive mu value (valid even when adapt_flag=0)
+   list[n++] = ubuf(adapt_counter).d;
++  list[n++] = nlocalvals;
++
++  double state = random_unequal->state();
++  MPI_Gather(&state, 1, MPI_DOUBLE, &list[n], 1, MPI_DOUBLE, 0, world);
+ 
+   if (comm->me == 0) {
+-    int size = n * sizeof(double);
++    int size = ntotalvals * sizeof(double);
+     fwrite(&size, sizeof(int), 1, fp);
+-    fwrite(list, sizeof(double), n, fp);
++    fwrite(list.data(), sizeof(double), ntotalvals, fp);
+   }
+ }
+ 
+@@ -1483,8 +1512,7 @@ void FixAtomSwap::restart(char *buf)
+   seed = static_cast<int>(list[n++]);
+   random_equal->reset(seed);
+ 
+-  seed = static_cast<int>(list[n++]);
+-  random_unequal->reset(seed);
++  int seed_unequal_rank0 = static_cast<int>(list[n++]);
+ 
+   next_reneighbor = (bigint) ubuf(list[n++]).i;
+ 
+@@ -1505,6 +1533,18 @@ void FixAtomSwap::restart(char *buf)
+   // reset partial accumulators so the resumed run starts clean
+   adapt_sum_N2   = 0.0;
+   adapt_sum_N2sq = 0.0;
++
++  // restore the per-rank state of random_unequal if the rank count is unchanged;
++  // otherwise derive distinct per-rank states from the stored rank-0 state
++  // (never reset every rank to the same value)
++
++  auto nlocalvals = static_cast<int>(list[n++]);
++  if (nlocalvals == comm->nprocs) {
++    seed = static_cast<int>(list[n + comm->me]);
++    random_unequal->reset(seed);
++  } else {
++    reset_rng_per_rank(random_unequal, seed_unequal_rank0, comm->me);
++  }
+ }
+ 
+ /* ----------------------------------------------------------------------
+diff --git a/src/MC/fix_gcmc.cpp b/src/MC/fix_gcmc.cpp
+index e697663a7..834764a72 100644
+--- a/src/MC/fix_gcmc.cpp
++++ b/src/MC/fix_gcmc.cpp
+@@ -50,6 +50,21 @@
+ 
+ using namespace LAMMPS_NS;
+ using namespace FixConst;
++
++/* ----------------------------------------------------------------------
++   give the "unequal" RNG a distinct, well-mixed state on every MPI rank.
++   A plain seed+rank offset is not enough for the Park-Miller generator:
++   consecutive seeds s and s+1 produce first draws that differ by only
++   16807/2^31 ~ 8e-6, so the ranks would still start (nearly) in step.
++   Hash (seed, rank) with the Jenkins hash that RanPark::reset(int,double*)
++   already provides for per-atom seeding.
++------------------------------------------------------------------------- */
++
++static void reset_rng_per_rank(RanPark *rng, int seed, int rank)
++{
++  double rank_coord[3] = {static_cast<double>(rank), 0.0, 0.0};
++  rng->reset(seed, rank_coord);
++}
+ using namespace MathConst;
+ 
+ // large energy value used to signal overlap
+@@ -121,9 +136,12 @@ FixGCMC::FixGCMC(LAMMPS *lmp, int narg, char **arg) :
+ 
+   random_equal = new RanPark(lmp, seed);
+ 
+-  // random number generator, not the same for all procs
++  // random number generator, not the same for all procs:
++  // the owning rank alone draws the trial displacement / Metropolis number
++  // from it, so every rank must hold its own stream (see fix atom/swap).
+ 
+   random_unequal = new RanPark(lmp, seed);
++  reset_rng_per_rank(random_unequal, seed, comm->me);
+ 
+   // error checks on region and its extent being inside simulation box
+ 
+@@ -2597,8 +2615,9 @@ void FixGCMC::restart(char *buf)
+   seed = static_cast<int> (list[n++]);
+   random_equal->reset(seed);
+ 
+-  seed = static_cast<int> (list[n++]);
+-  random_unequal->reset(seed);
++  seed = static_cast<int>(list[n++]);
++  // only the rank-0 state is stored: re-derive distinct per-rank states from it
++  reset_rng_per_rank(random_unequal, seed, comm->me);
+ 
+   next_reneighbor = (bigint) ubuf(list[n++]).i;
+ 
+-- 
+2.43.0
+

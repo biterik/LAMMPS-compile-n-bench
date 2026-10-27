@@ -42,6 +42,6 @@ git checkout -q -b "$MCSITES_BRANCH"
 git -c user.email=mcsites@localhost -c user.name='mc-sites build' am "$PATCHES_DIR"/00*.patch
 
 echo ">> $MCSITES_BRANCH ready at: $(git log -1 --format='%H %s')"
-echo ">> patches applied: $(git rev-list --count "$FORK_COMMIT"..HEAD)  (expected 5)"
+echo ">> patches applied: $(git rev-list --count "$FORK_COMMIT"..HEAD)  (expected 13)"
 echo ">> new files:"
 git show --stat --oneline HEAD~4..HEAD 2>/dev/null | grep -E 'compute_sites_voronoi|fix_mc_sites' | sed 's/^/     /' || true
