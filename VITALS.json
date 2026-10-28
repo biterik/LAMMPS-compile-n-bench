@@ -1,33 +1,33 @@
 {
   "activity": {
-    "commits_30d": 0,
+    "commits_30d": 1,
     "contributors_total": 2,
     "issues_closed_30d": 0,
     "issues_opened_30d": 0,
     "prs_merged_30d": 0,
     "prs_opened_30d": 0
   },
-  "collected_at": "2026-10-27T09:01:14Z",
-  "date": "2026-10-27",
+  "collected_at": "2026-10-28T09:41:06Z",
+  "date": "2026-10-28",
   "derived": {
     "clones_last_30d": 220,
-    "clones_last_7d": 27,
+    "clones_last_7d": 41,
     "downloads_gained_30d": 0,
     "downloads_total": 0,
     "funnel_30d": {
       "downloads_gained": 0,
       "stars_gained": 0,
-      "unique_cloners": 150,
-      "unique_visitors": 4
+      "unique_cloners": 149,
+      "unique_visitors": 5
     },
-    "history_days": 100,
+    "history_days": 101,
     "per_30d": {
-      "clones": 167.6,
+      "clones": 171.9,
       "downloads_gained": 0.0,
       "stars_gained": 0.3,
-      "unique_cloners": 117.0,
-      "unique_visitors": 3.3,
-      "views": 5.8
+      "unique_cloners": 118.8,
+      "unique_visitors": 3.6,
+      "views": 6.3
     },
     "repo_created_at": "2026-06-10T09:56:40Z",
     "star_forecast": {
@@ -40,39 +40,39 @@
     "stars_gained_7d": 0,
     "stars_now": 1,
     "totals": {
-      "clones": 553,
+      "clones": 573,
       "downloads_gained": 0,
       "stars_gained": 1,
-      "unique_cloners": 386,
-      "unique_visitors": 11,
-      "views": 19
+      "unique_cloners": 396,
+      "unique_visitors": 12,
+      "views": 21
     },
-    "tracking_days": 99,
+    "tracking_days": 100,
     "tracking_since": "2026-07-21",
-    "views_last_30d": 5,
-    "views_last_7d": 1,
-    "views_prev_7d": 3,
+    "views_last_30d": 7,
+    "views_last_7d": 3,
+    "views_prev_7d": 1,
     "windows": {
       "30d": {
         "clones": 220,
         "downloads_gained": 0,
         "stars_gained": 0,
-        "unique_visitors": 4,
-        "views": 5
+        "unique_visitors": 5,
+        "views": 7
       },
       "365d": {
-        "clones": 553,
+        "clones": 573,
         "downloads_gained": 0,
         "stars_gained": 1,
-        "unique_visitors": 11,
-        "views": 19
+        "unique_visitors": 12,
+        "views": 21
       },
       "90d": {
-        "clones": 535,
+        "clones": 553,
         "downloads_gained": 0,
         "stars_gained": 0,
-        "unique_visitors": 11,
-        "views": 19
+        "unique_visitors": 12,
+        "views": 21
       }
     }
   },
@@ -83,8 +83,8 @@
     "default_branch": "main",
     "fork": false,
     "open_issues": 0,
-    "pushed_at": "2026-10-26T08:57:09Z",
-    "size_kb": 404
+    "pushed_at": "2026-10-27T21:34:04Z",
+    "size_kb": 425
   },
   "popularity": {
     "forks": 0,
@@ -97,10 +97,6 @@
   "schema_version": 1,
   "traffic": {
     "clones": {
-      "2026-10-13": {
-        "count": 1,
-        "uniques": 1
-      },
       "2026-10-14": {
         "count": 12,
         "uniques": 8
@@ -152,12 +148,21 @@
       "2026-10-26": {
         "count": 5,
         "uniques": 4
+      },
+      "2026-10-27": {
+        "count": 20,
+        "uniques": 10
       }
     },
     "paths": [
       {
         "count": 2,
         "path": "/biterik/LAMMPS-compile-n-bench",
+        "uniques": 1
+      },
+      {
+        "count": 2,
+        "path": "/biterik/LAMMPS-compile-n-bench/commit/5586ea52fb1cf95fba80b9bc8cc37529f19c9e69",
         "uniques": 1
       },
       {
@@ -173,16 +178,12 @@
     ],
     "referrers": [
       {
-        "count": 2,
+        "count": 3,
         "referrer": "github.com",
-        "uniques": 1
+        "uniques": 2
       }
     ],
     "views": {
-      "2026-10-13": {
-        "count": 0,
-        "uniques": 0
-      },
       "2026-10-14": {
         "count": 2,
         "uniques": 1
@@ -233,6 +234,10 @@
       },
       "2026-10-26": {
         "count": 1,
+        "uniques": 1
+      },
+      "2026-10-27": {
+        "count": 2,
         "uniques": 1
       }
     }
