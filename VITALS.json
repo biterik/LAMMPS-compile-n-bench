@@ -7,27 +7,27 @@
     "prs_merged_30d": 0,
     "prs_opened_30d": 0
   },
-  "collected_at": "2026-10-28T09:41:06Z",
-  "date": "2026-10-28",
+  "collected_at": "2026-10-29T09:59:22Z",
+  "date": "2026-10-29",
   "derived": {
-    "clones_last_30d": 220,
-    "clones_last_7d": 41,
+    "clones_last_30d": 210,
+    "clones_last_7d": 42,
     "downloads_gained_30d": 0,
     "downloads_total": 0,
     "funnel_30d": {
       "downloads_gained": 0,
       "stars_gained": 0,
-      "unique_cloners": 149,
-      "unique_visitors": 5
+      "unique_cloners": 143,
+      "unique_visitors": 6
     },
-    "history_days": 101,
+    "history_days": 102,
     "per_30d": {
-      "clones": 171.9,
+      "clones": 171.1,
       "downloads_gained": 0.0,
       "stars_gained": 0.3,
-      "unique_cloners": 118.8,
-      "unique_visitors": 3.6,
-      "views": 6.3
+      "unique_cloners": 118.5,
+      "unique_visitors": 3.9,
+      "views": 6.5
     },
     "repo_created_at": "2026-06-10T09:56:40Z",
     "star_forecast": {
@@ -40,39 +40,39 @@
     "stars_gained_7d": 0,
     "stars_now": 1,
     "totals": {
-      "clones": 573,
+      "clones": 576,
       "downloads_gained": 0,
       "stars_gained": 1,
-      "unique_cloners": 396,
-      "unique_visitors": 12,
-      "views": 21
+      "unique_cloners": 399,
+      "unique_visitors": 13,
+      "views": 22
     },
-    "tracking_days": 100,
+    "tracking_days": 101,
     "tracking_since": "2026-07-21",
-    "views_last_30d": 7,
-    "views_last_7d": 3,
+    "views_last_30d": 8,
+    "views_last_7d": 4,
     "views_prev_7d": 1,
     "windows": {
       "30d": {
-        "clones": 220,
+        "clones": 210,
         "downloads_gained": 0,
         "stars_gained": 0,
-        "unique_visitors": 5,
-        "views": 7
+        "unique_visitors": 6,
+        "views": 8
       },
       "365d": {
-        "clones": 573,
+        "clones": 576,
         "downloads_gained": 0,
         "stars_gained": 1,
-        "unique_visitors": 12,
-        "views": 21
+        "unique_visitors": 13,
+        "views": 22
       },
       "90d": {
-        "clones": 553,
+        "clones": 556,
         "downloads_gained": 0,
         "stars_gained": 0,
-        "unique_visitors": 12,
-        "views": 21
+        "unique_visitors": 13,
+        "views": 22
       }
     }
   },
@@ -83,8 +83,8 @@
     "default_branch": "main",
     "fork": false,
     "open_issues": 0,
-    "pushed_at": "2026-10-27T21:34:04Z",
-    "size_kb": 425
+    "pushed_at": "2026-10-28T09:41:11Z",
+    "size_kb": 426
   },
   "popularity": {
     "forks": 0,
@@ -97,10 +97,6 @@
   "schema_version": 1,
   "traffic": {
     "clones": {
-      "2026-10-14": {
-        "count": 12,
-        "uniques": 8
-      },
       "2026-10-15": {
         "count": 24,
         "uniques": 14
@@ -152,22 +148,21 @@
       "2026-10-27": {
         "count": 20,
         "uniques": 10
+      },
+      "2026-10-28": {
+        "count": 3,
+        "uniques": 3
       }
     },
     "paths": [
       {
         "count": 2,
         "path": "/biterik/LAMMPS-compile-n-bench",
-        "uniques": 1
+        "uniques": 2
       },
       {
         "count": 2,
         "path": "/biterik/LAMMPS-compile-n-bench/commit/5586ea52fb1cf95fba80b9bc8cc37529f19c9e69",
-        "uniques": 1
-      },
-      {
-        "count": 1,
-        "path": "/biterik/LAMMPS-compile-n-bench/blob/main/FORK-ANALYSIS.md",
         "uniques": 1
       },
       {
@@ -178,16 +173,12 @@
     ],
     "referrers": [
       {
-        "count": 3,
+        "count": 2,
         "referrer": "github.com",
         "uniques": 2
       }
     ],
     "views": {
-      "2026-10-14": {
-        "count": 2,
-        "uniques": 1
-      },
       "2026-10-15": {
         "count": 0,
         "uniques": 0
@@ -238,6 +229,10 @@
       },
       "2026-10-27": {
         "count": 2,
+        "uniques": 1
+      },
+      "2026-10-28": {
+        "count": 1,
         "uniques": 1
       }
     }
