@@ -1,0 +1,188 @@
+{
+  "activity": {
+    "commits_30d": 1,
+    "contributors_total": 2,
+    "issues_closed_30d": 0,
+    "issues_opened_30d": 0,
+    "prs_merged_30d": 0,
+    "prs_opened_30d": 0
+  },
+  "collected_at": "2026-11-02T11:10:12Z",
+  "date": "2026-11-02",
+  "errors": [],
+  "meta": {
+    "archived": false,
+    "created_at": "2026-06-10T09:56:40Z",
+    "default_branch": "main",
+    "fork": false,
+    "open_issues": 0,
+    "pushed_at": "2026-11-01T10:28:52Z",
+    "size_kb": 434
+  },
+  "popularity": {
+    "forks": 0,
+    "stars": 1,
+    "subscribers": 0,
+    "watchers": 1
+  },
+  "releases": [],
+  "repo": "biterik/LAMMPS-compile-n-bench",
+  "schema_version": 1,
+  "traffic": {
+    "clones": {
+      "2026-10-19": {
+        "count": 5,
+        "uniques": 4
+      },
+      "2026-10-20": {
+        "count": 4,
+        "uniques": 4
+      },
+      "2026-10-21": {
+        "count": 6,
+        "uniques": 5
+      },
+      "2026-10-22": {
+        "count": 2,
+        "uniques": 2
+      },
+      "2026-10-23": {
+        "count": 3,
+        "uniques": 2
+      },
+      "2026-10-24": {
+        "count": 2,
+        "uniques": 2
+      },
+      "2026-10-25": {
+        "count": 9,
+        "uniques": 7
+      },
+      "2026-10-26": {
+        "count": 5,
+        "uniques": 4
+      },
+      "2026-10-27": {
+        "count": 20,
+        "uniques": 10
+      },
+      "2026-10-28": {
+        "count": 3,
+        "uniques": 3
+      },
+      "2026-10-29": {
+        "count": 15,
+        "uniques": 9
+      },
+      "2026-10-30": {
+        "count": 14,
+        "uniques": 7
+      },
+      "2026-10-31": {
+        "count": 13,
+        "uniques": 9
+      },
+      "2026-11-01": {
+        "count": 3,
+        "uniques": 3
+      }
+    },
+    "paths": [
+      {
+        "count": 5,
+        "path": "/biterik/LAMMPS-compile-n-bench/tree/main/atomswap-rankseed-build",
+        "uniques": 2
+      },
+      {
+        "count": 2,
+        "path": "/biterik/LAMMPS-compile-n-bench",
+        "uniques": 2
+      },
+      {
+        "count": 2,
+        "path": "/biterik/LAMMPS-compile-n-bench/commit/5586ea52fb1cf95fba80b9bc8cc37529f19c9e69",
+        "uniques": 1
+      },
+      {
+        "count": 1,
+        "path": "/biterik/LAMMPS-compile-n-bench/blob/main/atomswap-rankseed-build/patches/0001-fix-atom-swap-per-rank-random_unequal.patch",
+        "uniques": 1
+      },
+      {
+        "count": 1,
+        "path": "/biterik/LAMMPS-compile-n-bench/tree/main/atomswap-rankseed-build/patches",
+        "uniques": 1
+      },
+      {
+        "count": 1,
+        "path": "/biterik/LAMMPS-compile-n-bench/tree/main/bench",
+        "uniques": 1
+      }
+    ],
+    "referrers": [
+      {
+        "count": 2,
+        "referrer": "github.com",
+        "uniques": 2
+      }
+    ],
+    "views": {
+      "2026-10-19": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-10-20": {
+        "count": 1,
+        "uniques": 1
+      },
+      "2026-10-21": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-10-22": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-10-23": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-10-24": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-10-25": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-10-26": {
+        "count": 1,
+        "uniques": 1
+      },
+      "2026-10-27": {
+        "count": 2,
+        "uniques": 1
+      },
+      "2026-10-28": {
+        "count": 1,
+        "uniques": 1
+      },
+      "2026-10-29": {
+        "count": 3,
+        "uniques": 2
+      },
+      "2026-10-30": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-10-31": {
+        "count": 0,
+        "uniques": 0
+      },
+      "2026-11-01": {
+        "count": 4,
+        "uniques": 1
+      }
+    }
+  }
+}
