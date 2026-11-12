@@ -1,12 +1,12 @@
 # biterik/LAMMPS-compile-n-bench — repo vitals
 
 ![stars](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbiterik%2FLAMMPS-compile-n-bench%2Fvitals%2Fbadge%2Fstars.json) ![views/week](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbiterik%2FLAMMPS-compile-n-bench%2Fvitals%2Fbadge%2Fviews-week.json) 
-_Updated 2026-11-11T10:59:35Z (UTC) · machine-readable: [VITALS.json](VITALS.json) · full history: [history.ndjson](history.ndjson) · daily snapshots: [snapshots/](snapshots/)_
+_Updated 2026-11-12T11:13:40Z (UTC) · machine-readable: [VITALS.json](VITALS.json) · full history: [history.ndjson](history.ndjson) · daily snapshots: [snapshots/](snapshots/)_
 
 | | |
 |---|---|
 | Repository created | 2026-06-10 |
-| Tracked by repo-vitals since | 2026-07-21 (114 days)³ |
+| Tracked by repo-vitals since | 2026-07-21 (115 days)³ |
 
 
 ## Summary
@@ -15,7 +15,7 @@ _Updated 2026-11-11T10:59:35Z (UTC) · machine-readable: [VITALS.json](VITALS.js
 |---|---:|---:|---:|
 | Views | 15 | 28 | 30 |
 | Unique visitors¹ | 9 | 16 | 17 |
-| Clones | 246 | 634 | 703 |
+| Clones | 257 | 635 | 715 |
 | Stars gained | 0 | 0 | 1 |
 | Release downloads gained | 0 | 0 | 0 |
 
@@ -23,14 +23,14 @@ _Updated 2026-11-11T10:59:35Z (UTC) · machine-readable: [VITALS.json](VITALS.js
 
 ## Since tracking began
 
-Everything recorded so far, from 2026-07-21 (114 days) — the total, and the same total expressed as an average rate.
+Everything recorded so far, from 2026-07-21 (115 days) — the total, and the same total expressed as an average rate.
 
 | Metric | Total | Average / 30 d |
 |---|---:|---:|
-| Views | 30 | 7.9 |
-| Unique visitors¹ | 17 | 4.5 |
-| Clones | 703 | 185.0 |
-| Unique cloners¹ | 473 | 124.5 |
+| Views | 30 | 7.8 |
+| Unique visitors¹ | 17 | 4.4 |
+| Clones | 715 | 186.5 |
+| Unique cloners¹ | 479 | 125.0 |
 | Stars gained | 1 | 0.3 |
 | Release downloads gained | 0 | 0.0 |
 
@@ -39,14 +39,14 @@ Averages are the total divided by days tracked, times 30 — not a projection.
 ## Trends — last 30 days
 
 ```
-views  ▁▅▁▁▁▁▁▃▁▁▁▁▁▃▅▃▆▁▁█▁▁▃▁▁▁▁▁▁·  (15 total)
-clones ▁▄█▁▄▃▂▂▃▁▂▁▃▂▇▂▅▅▅▂▃▁▁▅▃█▄▂▄·  (246 total)
+views  ▅▁▁▁▁▁▃▁▁▁▁▁▃▅▃▆▁▁█▁▁▃▁▁▁▁▁▁▁·  (15 total)
+clones ▄█▁▄▃▂▂▃▁▂▁▃▂▇▂▅▅▅▂▃▁▁▅▃█▄▂▄▄·  (257 total)
 ```
 
 ('·' = day without data)
 
 Stars: **1** (+0 in 30 d, +0 in 7 d)
-**Conversion funnel (30 d):** 9 unique visitors → 155 unique cloners → 0 stars gained → 0 downloads gained
+**Conversion funnel (30 d):** 9 unique visitors → 160 unique cloners → 0 stars gained → 0 downloads gained
 
 ## Where visitors come from (14-day window)
 
@@ -54,7 +54,7 @@ Stars: **1** (+0 in 30 d, +0 in 7 d)
 | Popular path | Views | Unique |
 |---|---:|---:|
 | `/biterik/LAMMPS-compile-n-bench/tree/main/atomswap-rankseed-build` | 5 | 2 |
-| `/biterik/LAMMPS-compile-n-bench` | 2 | 1 |
+| `/biterik/LAMMPS-compile-n-bench` | 1 | 1 |
 | `/biterik/LAMMPS-compile-n-bench/blob/main/atomswap-rankseed-build/patches/0001-fix-atom-swap-per-rank-random_unequal.patch` | 1 | 1 |
 | `/biterik/LAMMPS-compile-n-bench/tree/main/atomswap-rankseed-build/patches` | 1 | 1 |
 
@@ -82,7 +82,7 @@ Interactive dashboard: [index.html](index.html) on this branch (raw URLs don't
 render HTML — view it via GitHub Pages on the vitals branch, the repo-vitals
 hub, or locally: `git clone -b vitals … && python -m http.server`).
 A copy of this report named with the repo and today's date lives at
-[reports/biterik-LAMMPS-compile-n-bench-2026-11-11.md](reports/biterik-LAMMPS-compile-n-bench-2026-11-11.md)
+[reports/biterik-LAMMPS-compile-n-bench-2026-11-12.md](reports/biterik-LAMMPS-compile-n-bench-2026-11-12.md)
 — safe to download standalone.
 
 <sub>[repo-vitals](https://github.com/biterik/repo-vitals) by Erik Bitzek —
